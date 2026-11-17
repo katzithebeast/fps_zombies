@@ -1,0 +1,451 @@
+{
+  "generation_tool": "Built-in image_gen",
+  "source_size": [
+    1672,
+    941
+  ],
+  "atlas_size": [
+    3840,
+    2160
+  ],
+  "atlas_grid": [
+    4,
+    2
+  ],
+  "atlas_resolution_method": "Bicubic upscale; original PNGs included. No added native detail.",
+  "format": "PNG RGBA",
+  "assets": [
+    {
+      "file": "individual/wall_scratches_01_diagonal_scratches.png",
+      "category": "wall_scratches",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        0,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        0,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_scratches_02_horizontal_scrape.png",
+      "category": "wall_scratches",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        418,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        960,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_scratches_03_deep_gouges.png",
+      "category": "wall_scratches",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        836,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        1920,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_scratches_04_fine_scratches.png",
+      "category": "wall_scratches",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        1254,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        2880,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_scratches_05_abrasion.png",
+      "category": "wall_scratches",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        0,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        0,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_scratches_06_vertical_scratches.png",
+      "category": "wall_scratches",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        418,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        960,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_scratches_07_branching_scratch.png",
+      "category": "wall_scratches",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        836,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        1920,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_scratches_08_worn_paint.png",
+      "category": "wall_scratches",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        1254,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        2880,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_mold_damp_01_black_mildew.png",
+      "category": "wall_mold_damp",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        0,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        0,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_mold_damp_02_green_mold.png",
+      "category": "wall_mold_damp",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        418,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        960,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_mold_damp_03_gray_mold.png",
+      "category": "wall_mold_damp",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        836,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        1920,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_mold_damp_04_water_ingress.png",
+      "category": "wall_mold_damp",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        1254,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        2880,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_mold_damp_05_damp_stain.png",
+      "category": "wall_mold_damp",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        0,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        0,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_mold_damp_06_dirty_leaks.png",
+      "category": "wall_mold_damp",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        418,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        960,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_mold_damp_07_heavy_mold_drips.png",
+      "category": "wall_mold_damp",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        836,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        1920,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_mold_damp_08_salt_efflorescence.png",
+      "category": "wall_mold_damp",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        1254,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        2880,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_cracks_peeling_01_vertical_crack.png",
+      "category": "wall_cracks_peeling",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        0,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        0,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_cracks_peeling_02_hairline_cracks.png",
+      "category": "wall_cracks_peeling",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        418,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        960,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_cracks_peeling_03_diagonal_crack.png",
+      "category": "wall_cracks_peeling",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        836,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        1920,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_cracks_peeling_04_flaked_paint.png",
+      "category": "wall_cracks_peeling",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        1254,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        2880,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_cracks_peeling_05_peeling_strip.png",
+      "category": "wall_cracks_peeling",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        0,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        0,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_cracks_peeling_06_chipped_plaster.png",
+      "category": "wall_cracks_peeling",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        418,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        960,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_cracks_peeling_07_impact_cracks.png",
+      "category": "wall_cracks_peeling",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        836,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        1920,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/wall_cracks_peeling_08_crazed_paint.png",
+      "category": "wall_cracks_peeling",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        1254,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        2880,
+        1080.0,
+        960,
+        1080
+      ]
+    }
+  ]
+}

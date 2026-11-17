@@ -1,0 +1,451 @@
+{
+  "generation_tool": "Built-in image_gen",
+  "source_size": [
+    1672,
+    941
+  ],
+  "atlas_size": [
+    3840,
+    2160
+  ],
+  "atlas_grid": [
+    4,
+    2
+  ],
+  "atlas_resolution_method": "Bicubic upscale; original source PNGs included. No added native detail.",
+  "format": "PNG RGBA",
+  "assets": [
+    {
+      "file": "individual/splatters_01_radial_impact.png",
+      "category": "splatters",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        0,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        0,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/splatters_02_horizontal_spray.png",
+      "category": "splatters",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        418,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        960,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/splatters_03_diagonal_impact.png",
+      "category": "splatters",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        836,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        1920,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/splatters_04_fine_mist.png",
+      "category": "splatters",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        1254,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        2880,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/splatters_05_heavy_splash.png",
+      "category": "splatters",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        0,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        0,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/splatters_06_scattered_drops.png",
+      "category": "splatters",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        418,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        960,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/splatters_07_double_impact.png",
+      "category": "splatters",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        836,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        1920,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/splatters_08_droplet_trail.png",
+      "category": "splatters",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        1254,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        2880,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/handprints_01_full_palm_01.png",
+      "category": "handprints",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        0,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        0,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/handprints_02_full_palm_02.png",
+      "category": "handprints",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        418,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        960,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/handprints_03_partial_palm_01.png",
+      "category": "handprints",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        836,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        1920,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/handprints_04_dry_palm_02.png",
+      "category": "handprints",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        1254,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        2880,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/handprints_05_short_drag.png",
+      "category": "handprints",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        0,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        0,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/handprints_06_long_drag.png",
+      "category": "handprints",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        418,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        960,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/handprints_07_sideways_smear.png",
+      "category": "handprints",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        836,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        1920,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/handprints_08_paired_partial_prints.png",
+      "category": "handprints",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        1254,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        2880,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/smears_01_horizontal_wipe.png",
+      "category": "smears",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        0,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        0,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/smears_02_diagonal_scrape.png",
+      "category": "smears",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        418,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        960,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/smears_03_vertical_wipe.png",
+      "category": "smears",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        836,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        1920,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/smears_04_gravity_drips.png",
+      "category": "smears",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        1254,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        2880,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/smears_05_thin_drip.png",
+      "category": "smears",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        0,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        0,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/smears_06_blood_pool.png",
+      "category": "smears",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        418,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        960,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/smears_07_curved_drag.png",
+      "category": "smears",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        836,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        1920,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/smears_08_dried_wipe.png",
+      "category": "smears",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        1254,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        2880,
+        1080.0,
+        960,
+        1080
+      ]
+    }
+  ]
+}

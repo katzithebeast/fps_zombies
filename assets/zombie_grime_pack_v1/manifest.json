@@ -1,0 +1,451 @@
+{
+  "generation_tool": "Built-in image_gen",
+  "source_size": [
+    1672,
+    941
+  ],
+  "atlas_size": [
+    3840,
+    2160
+  ],
+  "atlas_grid": [
+    4,
+    2
+  ],
+  "atlas_resolution_method": "Bicubic upscale; original PNGs included. No added native detail.",
+  "format": "PNG RGBA",
+  "assets": [
+    {
+      "file": "individual/mud_dust_01_dirt_patch.png",
+      "category": "mud_dust",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        0,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        0,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/mud_dust_02_wet_mud_splatter.png",
+      "category": "mud_dust",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        418,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        960,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/mud_dust_03_muddy_handprint.png",
+      "category": "mud_dust",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        836,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        1920,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/mud_dust_04_muddy_bootprint.png",
+      "category": "mud_dust",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        1254,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        2880,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/mud_dust_05_tire_track.png",
+      "category": "mud_dust",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        0,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        0,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/mud_dust_06_dried_mud.png",
+      "category": "mud_dust",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        418,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        960,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/mud_dust_07_dust_wipe.png",
+      "category": "mud_dust",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        836,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        1920,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/mud_dust_08_mud_droplets.png",
+      "category": "mud_dust",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        1254,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        2880,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/oil_soot_01_oil_spill.png",
+      "category": "oil_soot",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        0,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        0,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/oil_soot_02_greasy_drips.png",
+      "category": "oil_soot",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        418,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        960,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/oil_soot_03_grease_smear.png",
+      "category": "oil_soot",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        836,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        1920,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/oil_soot_04_oily_handprint.png",
+      "category": "oil_soot",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        1254,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        2880,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/oil_soot_05_soot_patch.png",
+      "category": "oil_soot",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        0,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        0,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/oil_soot_06_smoke_streak.png",
+      "category": "oil_soot",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        418,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        960,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/oil_soot_07_oily_ring.png",
+      "category": "oil_soot",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        836,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        1920,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/oil_soot_08_grease_wipe.png",
+      "category": "oil_soot",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        1254,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        2880,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/rust_mold_01_rust_patch.png",
+      "category": "rust_mold",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        0,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        0,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/rust_mold_02_rust_drips.png",
+      "category": "rust_mold",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        418,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        960,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/rust_mold_03_oxidation.png",
+      "category": "rust_mold",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        836,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        1920,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/rust_mold_04_green_mold.png",
+      "category": "rust_mold",
+      "width": 418,
+      "height": 470,
+      "original_crop": [
+        1254,
+        0,
+        418,
+        470
+      ],
+      "atlas_4k_rect": [
+        2880,
+        0.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/rust_mold_05_black_mildew.png",
+      "category": "rust_mold",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        0,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        0,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/rust_mold_06_damp_stain.png",
+      "category": "rust_mold",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        418,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        960,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/rust_mold_07_algae_slime.png",
+      "category": "rust_mold",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        836,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        1920,
+        1080.0,
+        960,
+        1080
+      ]
+    },
+    {
+      "file": "individual/rust_mold_08_mineral_deposit.png",
+      "category": "rust_mold",
+      "width": 418,
+      "height": 471,
+      "original_crop": [
+        1254,
+        470,
+        418,
+        471
+      ],
+      "atlas_4k_rect": [
+        2880,
+        1080.0,
+        960,
+        1080
+      ]
+    }
+  ]
+}

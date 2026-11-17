@@ -1,0 +1,16 @@
+# Godot cache a importy (vygeneruje se znovu)
+.godot/
+*.tmp
+
+# Editor, exporty a šablony (velké, neverzovat)
+_godot/
+dist/
+export_templates/
+
+# Zdrojové nahrávky a ruční zálohy
+_audio_src/
+_backups/
+perf/
+
+# Archivy
+*.zip
