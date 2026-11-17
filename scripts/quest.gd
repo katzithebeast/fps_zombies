@@ -71,7 +71,7 @@ var _pump_fix := 0.0
 var _jam_at := 0.5
 var _stage_t := 0.0
 var _gate: Dictionary
-var _angel_water: MeshInstance3D
+var _angel_water: Node3D
 var _angel_zone: Dictionary
 var _boss: Node3D
 var _weak: Array = []           # {body, mesh, hp}

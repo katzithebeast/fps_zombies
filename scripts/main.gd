@@ -119,7 +119,12 @@ var quest: Node3D
 var inventory: Node
 # Místa s jinou hladinou než WATER_Y (vypouštěná Síň anděla, Nádrž): [{rect, level}]
 var water_zones: Array = []
-var water_meshes: Array = []
+var water_meshes: Array = []       # pro každý water_rect uzel jeho skupiny hladiny
+var water_groups: PackedInt32Array = []
+var _floor_tiles: Array = []       # [Rect2, barva, měřítko dlaždic] podlah ve výšce FLOOR_Y
+const FLOOR_Y := -0.35
+const WATER_GRID := 0.2            # rozteč vrcholů hladiny (společná světová mřížka)
+const WATER_INTO_WALL := 0.2       # o kolik hladina zajede pod zeď (bez škvír u stěn)
 var voice: Node
 var _briefing_shown := false
 var _menu_cam: Camera3D
@@ -156,12 +161,9 @@ func _ready() -> void:
 		_vases.append(vase)
 	# Podlaha v tloušťce zdí u průchodů mezi novými částmi (jinak tam zela černá škvíra).
 	for gap in [[12.6, 13.8, -42.0, -40.0], [-13.2, -12.6, -38.8, -36.8],
-			[-4.0, -2.0, -46.6, -46.0], [24.0, 26.0, -34.6, -34.0], [-21.2, -19.2, -22.8, -22.2], [32.0, 35.0, -2.0, -1.4]]:
-		box(gap[0], gap[1], -1.0, -0.35, gap[2], gap[3], C_FLOOR)
-	# Průchody spojky Bludiště – Bufet: podlaha v barvě spojky a mokrá jako okolí (jinak světlé suché pruhy).
-	for gap in [[-13.2, -12.6, -52.8, -50.8], [-10.6, -10.0, -52.8, -50.8]]:
-		box(gap[0], gap[1], -1.0, -0.35, gap[2], gap[3], Color(0.88, 0.93, 0.93))
-		water(gap[0], gap[1], gap[2], gap[3])
+			[-4.0, -2.0, -46.6, -46.0], [24.0, 26.0, -34.6, -34.0], [-21.2, -19.2, -22.8, -22.2], [32.0, 35.0, -2.0, -1.4],
+			[-13.2, -12.6, -52.8, -50.8], [-10.6, -10.0, -52.8, -50.8]]:
+		_gap_floor(gap[0], gap[1], gap[2], gap[3])
 	_merge_world()
 	_settle_vases.call_deferred()
 	_build_water()
@@ -810,6 +812,8 @@ func box(x0: float, x1: float, y0: float, y1: float, z0: float, z1: float, tint 
 		mi.material_override = tile_mat
 		mi.set_instance_shader_parameter("tint", _palette.get(tint, tint))
 		mi.set_instance_shader_parameter("tile_scale", scale * _tile_mul)
+		if absf(y1 - FLOOR_Y) < 0.01:
+			_floor_tiles.append([Rect2(x0, z0, x1 - x0, z1 - z0), _palette.get(tint, tint), scale * _tile_mul])
 	add_child(mi)
 	if solid:
 		var cs := CollisionShape3D.new()
@@ -904,13 +908,50 @@ func add_water_zone(rect: Rect2, level: float) -> Dictionary:
 	water_zones.append(zone)
 	return zone
 
-func water_mesh_for(xz: Vector2) -> MeshInstance3D:
+func water_mesh_for(xz: Vector2) -> Node3D:
 	for i in water_rects.size():
 		if water_rects[i].has_point(xz) and i < water_meshes.size(): return water_meshes[i]
 	return null
 
-func water(x0: float, x1: float, z0: float, z1: float) -> void:
+## Vodní obdélník. Skupina > 0 = samostatná hladina, kterou jde posouvat (vypouštění bazénu).
+func water(x0: float, x1: float, z0: float, z1: float, group := 0) -> void:
 	water_rects.append(Rect2(x0, z0, x1 - x0, z1 - z0))
+	water_groups.append(group)
+
+func _floor_at(xz: Vector2) -> Array:
+	for i in range(_floor_tiles.size() - 1, -1, -1):
+		if (_floor_tiles[i][0] as Rect2).has_point(xz): return _floor_tiles[i]
+	return []
+
+func _is_wet(xz: Vector2) -> bool:
+	for r in water_rects:
+		if r.has_point(xz): return true
+	return false
+
+## Podlaha v tloušťce zdi u průchodu: každá polovina má barvu a dlaždice místnosti, ke které patří,
+## a když jsou mokré obě strany, vede pod průchodem i voda (jinak suchý světlý pruh mezi místnostmi).
+func _gap_floor(x0: float, x1: float, z0: float, z1: float) -> void:
+	var along_x := (x1 - x0) < (z1 - z0)          # tenká osa = směr průchodu
+	var mid := (x0 + x1) * 0.5 if along_x else (z0 + z1) * 0.5
+	var c := Vector2((x0 + x1) * 0.5, (z0 + z1) * 0.5)
+	var probe_a := Vector2(x0 - 0.15, c.y) if along_x else Vector2(c.x, z0 - 0.15)
+	var probe_b := Vector2(x1 + 0.15, c.y) if along_x else Vector2(c.x, z1 + 0.15)
+	var fa := _floor_at(probe_a)
+	var fb := _floor_at(probe_b)
+	if fa.is_empty(): fa = fb
+	if fb.is_empty(): fb = fa
+	var halves := [[x0, mid, z0, z1], [mid, x1, z0, z1]] if along_x else [[x0, x1, z0, mid], [x0, x1, mid, z1]]
+	for k in 2:
+		var h: Array = halves[k]
+		var f: Array = fa if k == 0 else fb
+		if f.is_empty():
+			box(h[0], h[1], -1.0, FLOOR_Y, h[2], h[3], C_FLOOR)
+		else:
+			_floor_tiles.append([Rect2(h[0], h[2], h[1] - h[0], h[3] - h[2]), f[1], f[2]])
+			var mi := box(h[0], h[1], -1.0, FLOOR_Y, h[2], h[3], f[1])
+			mi.set_instance_shader_parameter("tile_scale", f[2])
+	if _is_wet(probe_a) and _is_wet(probe_b) and not _is_wet(c):
+		water(x0, x1, z0, z1)
 
 # =============================================================== úroveň
 func _build_level() -> void:
@@ -1135,20 +1176,118 @@ func _ramp() -> void:
 	world_body.add_child(cs)
 
 func _build_water() -> void:
+	# Hladina jako sjednocení vodních obdélníků v JEDNÉ společné mřížce (souřadnice všech hran
+	# + světová mřížka WATER_GRID). Díky tomu:
+	#  - se plochy nepřekrývají (dvojitá průhlednost dělala světlejší pásy),
+	#  - sousední buňky sdílejí přesně stejné vrcholy (žádné T-spoje → při vlnění se hladina netrhá),
+	#  - hladina zajede kousek pod zdi, takže u stěn nezůstává suchá škvíra.
+	if water_rects.is_empty(): return
+	var bound := water_rects[0].grow(WATER_INTO_WALL + 0.01)
+	for r in water_rects: bound = bound.merge(r.grow(WATER_INTO_WALL + 0.01))
+	var snap := func(v: float) -> float: return snappedf(v, 0.001)
+	var xs_d := {}
+	var zs_d := {}
 	for r in water_rects:
-		var nx := int(round(r.size.x / GRID))
-		var nz := int(round(r.size.y / GRID))
+		for v in [r.position.x, r.end.x, r.position.x - WATER_INTO_WALL, r.end.x + WATER_INTO_WALL]: xs_d[snap.call(v)] = true
+		for v in [r.position.y, r.end.y, r.position.y - WATER_INTO_WALL, r.end.y + WATER_INTO_WALL]: zs_d[snap.call(v)] = true
+	# hrany zdí v dosahu: buňka pod zdí pak nikdy nepřečnívá do volného prostoru
+	for sa in solids:
+		var a: AABB = sa
+		if a.position.y > WATER_Y - 0.01 or a.end.y < WATER_Y + 0.01: continue
+		for v in [a.position.x, a.end.x]:
+			if v > bound.position.x and v < bound.end.x: xs_d[snap.call(v)] = true
+		for v in [a.position.z, a.end.z]:
+			if v > bound.position.y and v < bound.end.y: zs_d[snap.call(v)] = true
+	var g0 := floorf(bound.position.x / WATER_GRID)
+	while g0 * WATER_GRID < bound.end.x:
+		xs_d[snap.call(g0 * WATER_GRID)] = true
+		g0 += 1.0
+	g0 = floorf(bound.position.y / WATER_GRID)
+	while g0 * WATER_GRID < bound.end.y:
+		zs_d[snap.call(g0 * WATER_GRID)] = true
+		g0 += 1.0
+	var xs: Array = xs_d.keys()
+	var zs: Array = zs_d.keys()
+	xs.sort()
+	zs.sort()
+	var nx := xs.size() - 1
+	var nz := zs.size() - 1
+	var cells := PackedInt32Array()
+	cells.resize(nx * nz)
+	cells.fill(-1)
+	var wall := PackedByteArray()
+	wall.resize(nx * nz)
+	# zdi a sloupy, které protínají hladinu
+	for sa in solids:
+		var a: AABB = sa
+		if a.position.y > WATER_Y - 0.01 or a.end.y < WATER_Y + 0.01: continue
+		var i0: int = maxi(xs.bsearch(a.position.x) - 1, 0)
+		var i1: int = mini(xs.bsearch(a.end.x) + 1, nx)
+		var j0: int = maxi(zs.bsearch(a.position.z) - 1, 0)
+		var j1: int = mini(zs.bsearch(a.end.z) + 1, nz)
+		for j in range(j0, j1):
+			var cz: float = (zs[j] + zs[j + 1]) * 0.5
+			if cz <= a.position.z or cz >= a.end.z: continue
+			for i in range(i0, i1):
+				var cx: float = (xs[i] + xs[i + 1]) * 0.5
+				if cx > a.position.x and cx < a.end.x: wall[j * nx + i] = 1
+	var fill := func(x0: float, x1: float, z0: float, z1: float, g: int, only_wall: bool) -> void:
+		var i0: int = xs.bsearch(snap.call(x0))
+		var i1: int = xs.bsearch(snap.call(x1))
+		var j0: int = zs.bsearch(snap.call(z0))
+		var j1: int = zs.bsearch(snap.call(z1))
+		for j in range(j0, j1):
+			for i in range(i0, i1):
+				var k: int = j * nx + i
+				if only_wall:
+					if cells[k] < 0 and wall[k] == 1: cells[k] = g
+				else:
+					cells[k] = g
+	for n in water_rects.size():
+		var r := water_rects[n]
+		fill.call(r.position.x, r.end.x, r.position.y, r.end.y, water_groups[n], false)
+	var d := WATER_INTO_WALL
+	for n in water_rects.size():
+		var r := water_rects[n]
+		var g := water_groups[n]
+		fill.call(r.position.x - d, r.position.x, r.position.y - d, r.end.y + d, g, true)
+		fill.call(r.end.x, r.end.x + d, r.position.y - d, r.end.y + d, g, true)
+		fill.call(r.position.x, r.end.x, r.position.y - d, r.position.y, g, true)
+		fill.call(r.position.x, r.end.x, r.end.y, r.end.y + d, g, true)
+	# meshe: skupina → kousky 16×16 m (ořez mimo záběr kamery)
+	const CHUNK := 16.0
+	var chunks := {}
+	for j in nz:
+		for i in nx:
+			var g := cells[j * nx + i]
+			if g < 0: continue
+			var key := Vector3i(g, int(floorf(xs[i] / CHUNK)), int(floorf(zs[j] / CHUNK)))
+			if not chunks.has(key): chunks[key] = []
+			(chunks[key] as Array).append(j * nx + i)
+	var group_nodes := {}
+	var tris := 0
+	for key in chunks:
+		var g: int = key.x
+		if not group_nodes.has(g):
+			var gn := Node3D.new()
+			gn.name = "Water%d" % g
+			add_child(gn)
+			group_nodes[g] = gn
 		var verts := PackedVector3Array()
 		var normals := PackedVector3Array()
 		var idx := PackedInt32Array()
-		for j in nz + 1:
-			for i in nx + 1:
-				verts.append(Vector3(r.position.x + r.size.x * i / nx, WATER_Y, r.position.y + r.size.y * j / nz))
-				normals.append(Vector3.UP)
-		for j in nz:
-			for i in nx:
-				var a := j * (nx + 1) + i
-				idx.append_array(PackedInt32Array([a, a + 1, a + nx + 1, a + 1, a + nx + 2, a + nx + 1]))
+		var vmap := {}
+		for ck in chunks[key]:
+			var i: int = ck % nx
+			var j: int = ck / nx
+			var q: Array[int] = []
+			for c in [Vector2i(i, j), Vector2i(i + 1, j), Vector2i(i, j + 1), Vector2i(i + 1, j + 1)]:
+				if not vmap.has(c):
+					vmap[c] = verts.size()
+					verts.append(Vector3(xs[c.x], WATER_Y, zs[c.y]))
+					normals.append(Vector3.UP)
+				q.append(vmap[c])
+			idx.append_array(PackedInt32Array([q[0], q[1], q[2], q[1], q[3], q[2]]))
 		var arr := []
 		arr.resize(Mesh.ARRAY_MAX)
 		arr[Mesh.ARRAY_VERTEX] = verts
@@ -1163,8 +1302,11 @@ func _build_water() -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mi.extra_cull_margin = 0.5
 		mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
-		add_child(mi)
-		water_meshes.append(mi)
+		(group_nodes[g] as Node3D).add_child(mi)
+		tris += idx.size() / 3
+	water_meshes.clear()
+	for n in water_rects.size(): water_meshes.append(group_nodes.get(water_groups[n]))
+	print("voda: %d kousků, %d trojúhelníků, mřížka %d×%d" % [chunks.size(), tris, nx, nz])
 	for i in 4:
 		splashes.append(_make_splash())
 	_build_dust()
@@ -1353,7 +1495,7 @@ func _build_east_wing() -> void:
 	for cx in [23.0, 44.0]:
 		for cz in [-30.0, -18.0, -6.0]:
 			box(cx - 0.5, cx + 0.5, -0.35, 16, cz - 0.5, cz + 0.5)
-	water(20.6, 46.6, -34, -2)
+	water(20.6, 46.6, -34, -2, 1)                     # skupina 1: Andělský bazén se dá vypustit
 	# socha: obří hlava a ramena vyčnívají z vody
 	var angel := Props.angel(ANGEL_DEPTH + 6.0)
 	add_child(angel)
@@ -2148,7 +2290,7 @@ func _build_south_wing() -> void:
 	_palette = {C_WALL: Color(0.7, 0.82, 0.86)}
 	_tile_mul = 1.5
 	box(4.0, 13.8, -1.0, -0.35, -53.1, -50.9, C_FLOOR)
-	water(4.0, 13.8, -53.1, -50.9)
+	water(4.0, 13.8, -53.35, -50.65)                  # o kousek za stěnu trubky: žádné suché pruhy po stranách
 	# Kulatá trubka s vlastním mapováním: dlaždice obíhají dokola (ve stropě se netáhnou)
 	# a na obou koncích čelní stěna s kruhovým výřezem zakryje zbytek obdélníkového otvoru.
 	var tunnel := MeshInstance3D.new()
@@ -2595,8 +2737,12 @@ func _build_light_shafts() -> void:
 
 func _setup_sim() -> void:
 	sim = WaterSim.new()
+	if not water_rects.is_empty():
+		var area := water_rects[0]
+		for r in water_rects: area = area.merge(r)
+		sim.fit(area)
 	add_child(sim)
-	var n := WaterSim.RES
+	var n := sim.res
 	var img := Image.create(n, n, false, Image.FORMAT_R8)
 	img.fill(Color(0, 0, 0))
 	var to_px := func(v: float, o: float) -> int: return int(round((v - o) / sim.size * n))
@@ -3279,7 +3425,7 @@ func _process_timed(dt: float) -> void:
 		refl_cam.global_transform = Transform3D(Basis(mx, -my, mz), Vector3(o.x, 2.0 * WATER_Y - o.y, o.z))
 		refl_cam.fov = cam.fov
 		refl_cam.near = cam.near
-		refl_cam.far = minf(cam.far, 30.0)
+		refl_cam.far = minf(cam.far, 48.0)      # 30 m uřízlo vzdálené zdi: v odrazu pak byl na hladině pruh pozadí
 		# Kouká-li hráč vzhůru, hladinu nevidí: odraz se nemusí kreslit.
 		var sees_water := -b.z.y < 0.6 and (o.y - WATER_Y) < 12.0
 		# Při klidném pohledu stačí odraz obnovit každý druhý snímek (vlny ho stejně rozmývají);
@@ -3505,7 +3651,8 @@ func _tube_cap(r: float, half_w: float, y0: float, y1: float, seg: int) -> Array
 				pts.append([inner, outer])
 			var tri := [pts[0][0], pts[1][0], pts[1][1], pts[0][0], pts[1][1], pts[0][1]]
 			if side < 0.0: tri.reverse()
+			# Godot: přední strana = po směru hodin. Pořadí výše míří na -X pro side=1, proto normála -side.
 			for p2 in tri:
-				st.set_normal(Vector3(side, 0, 0))
+				st.set_normal(Vector3(-side, 0, 0))
 				st.add_vertex(Vector3(0, (p2 as Vector2).y, (p2 as Vector2).x))
 	return st.commit()

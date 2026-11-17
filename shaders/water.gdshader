@@ -24,7 +24,10 @@ uniform float refl_gain = 1.0;
 varying vec3 wpos;
 
 float simh(vec2 xz) {
-	return textureLod(sim_tex, (xz - sim_origin) / sim_size, 0.0).r;
+	vec2 uv = (xz - sim_origin) / sim_size;
+	// mimo simulaci klidná hladina (bez roztažených krajních texelů)
+	if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 0.0;
+	return textureLod(sim_tex, uv, 0.0).r;
 }
 
 void vertex() {

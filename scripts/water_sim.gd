@@ -5,12 +5,14 @@ signal impulse_added(point: Vector2, radius: float, strength: float)
 ## Výška hladiny je v textuře R32F, kterou čte shader vody i dlaždic (kaustiky).
 ## Vlny se odrážejí od stěn a sloupů podle masky.
 
-const RES := 1024            # rozlišení simulace (texely na stranu)
+const RES := 1024            # výchozí rozlišení (texely na stranu); skutečné je v `res`
+const TEXEL := 48.0 / 1024.0 # velikost texelu v metrech: drží rychlost a tvar vln
 const SUBSTEPS := 1          # kroků simulace na fyzikální tik
 const MAX_POINTS := 6        # 112 B push constants: funguje i na GPU s limitem 128 B
 
 var origin := Vector2(-32.0, -28.0)   # světové XZ levého horního rohu
 var size := 48.0                      # délka strany v metrech
+var res := RES                        # texelů na stranu (nastaví fit())
 var wave_c2 := 0.24                   # (rychlost vln)^2 v texelech na krok, musí být < 0.5
 var damping := 0.9965
 var texture := Texture2DRD.new()
@@ -67,6 +69,14 @@ void main() {
 }
 """
 
+## Natáhne simulaci přes celou oblast s vodou (stejná velikost texelu, jen víc texelů).
+## Dřív pokrývala jen 48×48 m a za okrajem se krajní řádek textury roztahoval do pruhů.
+func fit(area: Rect2) -> void:
+	var a := area.grow(1.0)
+	res = int(ceilf(maxf(a.size.x, a.size.y) / TEXEL / 8.0)) * 8
+	size = res * TEXEL
+	origin = a.get_center() - Vector2(size, size) * 0.5
+
 func setup(mask: Image) -> void:
 	_mask_bytes = mask.get_data()
 	RenderingServer.call_on_render_thread(_init_rd)
@@ -81,10 +91,10 @@ func apply_network_impulse(world_xz: Vector2, radius_m: float, strength: float) 
 	_queue_impulse(world_xz, radius_m, strength)
 
 func _queue_impulse(world_xz: Vector2, radius_m: float, strength: float) -> void:
-	var p := (world_xz - origin) / size * float(RES)
-	if p.x < 0.0 or p.y < 0.0 or p.x >= RES or p.y >= RES:
+	var p := (world_xz - origin) / size * float(res)
+	if p.x < 0.0 or p.y < 0.0 or p.x >= res or p.y >= res:
 		return
-	_points.append(Vector4(p.x, p.y, maxf(radius_m / size * float(RES), 1.0), strength))
+	_points.append(Vector4(p.x, p.y, maxf(radius_m / size * float(res), 1.0), strength))
 
 var _quiet := 0.0
 
@@ -147,23 +157,23 @@ func _init_rd() -> void:
 	var tf := RDTextureFormat.new()
 	tf.format = RenderingDevice.DATA_FORMAT_R32_SFLOAT
 	tf.texture_type = RenderingDevice.TEXTURE_TYPE_2D
-	tf.width = RES
-	tf.height = RES
+	tf.width = res
+	tf.height = res
 	tf.depth = 1
 	tf.array_layers = 1
 	tf.mipmaps = 1
 	tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT \
 		| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	var zero := PackedByteArray()
-	zero.resize(RES * RES * 4)
+	zero.resize(res * res * 4)
 	for i in 3:
 		_tex.append(_rd.texture_create(tf, RDTextureView.new(), [zero]))
 
 	var mf := RDTextureFormat.new()
 	mf.format = RenderingDevice.DATA_FORMAT_R8_UNORM
 	mf.texture_type = RenderingDevice.TEXTURE_TYPE_2D
-	mf.width = RES
-	mf.height = RES
+	mf.width = res
+	mf.height = res
 	mf.depth = 1
 	mf.array_layers = 1
 	mf.mipmaps = 1
@@ -188,7 +198,7 @@ func _make_set(tex: RID, set_index: int) -> RID:
 	return _rd.uniform_set_create([u], _shader, set_index)
 
 func _step(cur: int, prv: int, nxt: int, pc: PackedByteArray) -> void:
-	var groups := int((RES - 1) / 8.0) + 1
+	var groups := int((res - 1) / 8.0) + 1
 	var cl := _rd.compute_list_begin()
 	_rd.compute_list_bind_compute_pipeline(cl, _pipeline)
 	_rd.compute_list_bind_uniform_set(cl, _sets[cur][0], 0)

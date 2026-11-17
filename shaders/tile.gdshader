@@ -96,6 +96,10 @@ void fragment() {
 	float hc = textureLod(sim_tex, suv, 0.0).r;
 	float lap = textureLod(sim_tex, suv + vec2(e, 0.0) / sim_size, 0.0).r + textureLod(sim_tex, suv - vec2(e, 0.0) / sim_size, 0.0).r
 		+ textureLod(sim_tex, suv + vec2(0.0, e) / sim_size, 0.0).r + textureLod(sim_tex, suv - vec2(0.0, e) / sim_size, 0.0).r - 4.0 * hc;
+	// mimo simulaci klidná voda (jinak by se krajní texely roztáhly do pruhů)
+	float sin_ = step(0.0, suv.x) * step(suv.x, 1.0) * step(0.0, suv.y) * step(suv.y, 1.0);
+	hc *= sin_;
+	lap *= sin_;
 	float focus = clamp(1.0 - lap * 9.0 * clamp(-dy * 2.0, 0.0, 1.5), 0.25, 3.5);     // hřeben vlny světlo soustředí
 	float cfade = under * smoothstep(0.0, 0.22, -dy) * caustic_strength * mix(0.22, 1.0, in_hall);
 	alb *= mix(vec3(1.0), (0.62 + 0.8 * ca) * focus, cfade);
