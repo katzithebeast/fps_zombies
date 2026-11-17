@@ -147,7 +147,7 @@ func _ready() -> void:
 	load("res://scripts/architecture.gd").build(self)
 	_scatter_blood.call_deferred()
 	# Vázy s kytkami: kousek života v opuštěných prostorách.
-	for v in [[Vector3(-4.6, 0.8, -50.4), 0.55], [Vector3(36.6, 1.45, 16.6), 1.3], [Vector3(24.6, 1.45, 16.4), 1.3], [Vector3(3.0, 0.5, 1.9), 1.0], [Vector3(60.8, -0.35, 39.2), 1.4], [Vector3(14.5, -0.35, -35.0), 1.3]]:
+	for v in [[Vector3(36.6, 1.45, 16.6), 1.3], [Vector3(24.6, 1.45, 16.4), 1.3], [Vector3(3.0, 0.5, 1.9), 1.0], [Vector3(60.8, -0.35, 39.2), 1.4], [Vector3(14.5, -0.35, -35.0), 1.3]]:
 		var vase := Props.vase()
 		add_child(vase)
 		vase.position = v[0]
@@ -155,9 +155,13 @@ func _ready() -> void:
 		vase.rotation.y = randf() * TAU
 		_vases.append(vase)
 	# Podlaha v tloušťce zdí u průchodů mezi novými částmi (jinak tam zela černá škvíra).
-	for gap in [[12.6, 13.8, -42.0, -40.0], [-13.2, -12.6, -38.8, -36.8], [-13.2, -12.6, -52.8, -50.8], [-10.6, -10.0, -52.8, -50.8],
-			[-4.0, -2.0, -46.6, -46.0], [24.0, 26.0, -34.6, -34.0], [4.0, 4.6, -53.1, -50.9], [-21.2, -19.2, -22.8, -22.2], [32.0, 35.0, -2.0, -1.4]]:
+	for gap in [[12.6, 13.8, -42.0, -40.0], [-13.2, -12.6, -38.8, -36.8],
+			[-4.0, -2.0, -46.6, -46.0], [24.0, 26.0, -34.6, -34.0], [-21.2, -19.2, -22.8, -22.2], [32.0, 35.0, -2.0, -1.4]]:
 		box(gap[0], gap[1], -1.0, -0.35, gap[2], gap[3], C_FLOOR)
+	# Průchody spojky Bludiště – Bufet: podlaha v barvě spojky a mokrá jako okolí (jinak světlé suché pruhy).
+	for gap in [[-13.2, -12.6, -52.8, -50.8], [-10.6, -10.0, -52.8, -50.8]]:
+		box(gap[0], gap[1], -1.0, -0.35, gap[2], gap[3], Color(0.88, 0.93, 0.93))
+		water(gap[0], gap[1], gap[2], gap[3])
 	_merge_world()
 	_settle_vases.call_deferred()
 	_build_water()
@@ -2114,7 +2118,10 @@ func _build_south_wing() -> void:
 	var metal := _surface("steel")
 	var counter_top := _surface("laminate")
 	# Bufet: skutečné modely pokladny, regálů a automatu.
-	_prop("cashier", Vector3(-3.0, -0.35, -50.6), PI)
+	# Kolize jen do výšky pultu: celá krabice přes stojan dělala ve 2 m neviditelnou poličku,
+	# na které „levitovala“ váza a drobnosti.
+	_prop("cashier", Vector3(-3.0, -0.35, -50.6), PI, false)
+	_collider(Vector3(-3.0, 0.25, -50.6), Vector3(3.9, 1.2, 1.8))
 	for sx in [-8.6, -7.45, -6.3]:
 		_prop("shelves", Vector3(sx, -0.35, -54.2), 0.0)
 		_prop("shelves", Vector3(sx, -0.35, -56.4), 0.0)
@@ -2141,7 +2148,7 @@ func _build_south_wing() -> void:
 	_palette = {C_WALL: Color(0.7, 0.82, 0.86)}
 	_tile_mul = 1.5
 	box(4.0, 13.8, -1.0, -0.35, -53.1, -50.9, C_FLOOR)
-	water(4.0, 13.8, -53.0, -51.0)
+	water(4.0, 13.8, -53.1, -50.9)
 	# Kulatá trubka s vlastním mapováním: dlaždice obíhají dokola (ve stropě se netáhnou)
 	# a na obou koncích čelní stěna s kruhovým výřezem zakryje zbytek obdélníkového otvoru.
 	var tunnel := MeshInstance3D.new()
@@ -2161,6 +2168,7 @@ func _build_south_wing() -> void:
 		cap.material_override = tile_mat
 		cap.set_instance_shader_parameter("tint", end[1])
 		cap.set_instance_shader_parameter("tile_scale", end[2])
+		cap.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF   # oboustranná plocha by stínila sama sebe (tmavý obdélník)
 		cap.position = Vector3(end_x, TUNNEL_Y, -52.0)
 		add_child(cap)
 	_collider(Vector3(8.9, 0.8, -53.15), Vector3(9.8, 2.4, 0.3))
