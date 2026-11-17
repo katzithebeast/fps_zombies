@@ -156,7 +156,7 @@ func _ready() -> void:
 		_vases.append(vase)
 	# Podlaha v tloušťce zdí u průchodů mezi novými částmi (jinak tam zela černá škvíra).
 	for gap in [[12.6, 13.8, -42.0, -40.0], [-13.2, -12.6, -38.8, -36.8], [-13.2, -12.6, -52.8, -50.8], [-10.6, -10.0, -52.8, -50.8],
-			[-4.0, -2.0, -46.6, -46.0], [24.0, 26.0, -34.6, -34.0], [4.0, 4.6, -53.0, -51.0], [-21.2, -19.2, -22.8, -22.2], [32.0, 35.0, -2.0, -1.4]]:
+			[-4.0, -2.0, -46.6, -46.0], [24.0, 26.0, -34.6, -34.0], [4.0, 4.6, -53.1, -50.9], [-21.2, -19.2, -22.8, -22.2], [32.0, 35.0, -2.0, -1.4]]:
 		box(gap[0], gap[1], -1.0, -0.35, gap[2], gap[3], C_FLOOR)
 	_merge_world()
 	_settle_vases.call_deferred()
@@ -2103,9 +2103,10 @@ func _build_south_wing() -> void:
 	water(-4.0, -2.0, -46.6, -46.0)
 	box(-10.6, -10.0, -1.0, 3.0, -59.4, -52.8)
 	box(-10.6, -10.0, -1.0, 3.0, -50.8, -46.6)
-	box(4.0, 4.6, -1.0, 3.0, -59.4, -53.0)
-	box(4.0, 4.6, -1.0, 3.0, -51.0, -46.6)
-	box(4.0, 4.6, 2.2, 3.0, -53.0, -51.0)
+	# kruhový vstup do tunelu: otvor na celý průměr trubky, rohy zakryje čelní stěna tunelu
+	box(4.0, 4.6, -1.0, 3.0, -59.4, -53.55)
+	box(4.0, 4.6, -1.0, 3.0, -50.45, -46.6)
+	box(4.0, 4.6, 2.3, 3.0, -53.55, -50.45)
 	box(-10.6, 4.6, -1.0, 3.0, -59.4, -58.8)
 	slab_with_holes(-10.6, 4.6, -59.4, -46.6, 3.0, 3.6, [] as Array[Rect2], C_CEIL, 0.5)
 	box(-9.99, 3.99, 1.2, 1.4, -58.79, -58.78, C_BLUE, false)
@@ -2127,16 +2128,6 @@ func _build_south_wing() -> void:
 	for g in goods: goods_mats.append(_mat(g, 0.6))
 	for k in 8:
 		_part(self, _boxm(Vector3(0.18, 0.22, 0.14)), goods_mats[k % goods_mats.size()], Vector3(-0.2 + k * 0.35, -0.24, -52.6 + randf_range(-0.6, 0.6)), Vector3(randf(), randf() * 3, randf()))
-	var sign := Label3D.new()
-	sign.text = "BUFET"
-	sign.font_size = 120
-	sign.pixel_size = 0.004
-	sign.modulate = Color(1.0, 0.25, 0.2)
-	sign.outline_size = 0
-	sign.shaded = false
-	sign.position = Vector3(-3.0, 2.35, -46.66)
-	sign.rotation.y = PI
-	add_child(sign)
 	var prices := Label3D.new()
 	prices.text = "ZMRZLINA ....... 12 Kč\nPÁREK V ROHLÍKU 18 Kč\nLIMONÁDA ....... 9 Kč"
 	prices.font_size = 32
@@ -2149,29 +2140,32 @@ func _build_south_wing() -> void:
 	# -- kulatý tunel z bufetu do atria
 	_palette = {C_WALL: Color(0.7, 0.82, 0.86)}
 	_tile_mul = 1.5
-	box(4.6, 13.8, -1.0, -0.35, -53.0, -51.0, C_FLOOR)
+	box(4.0, 13.8, -1.0, -0.35, -53.1, -50.9, C_FLOOR)
 	water(4.0, 13.8, -53.0, -51.0)
 	# Kulatá trubka s vlastním mapováním: dlaždice obíhají dokola (ve stropě se netáhnou)
 	# a na obou koncích čelní stěna s kruhovým výřezem zakryje zbytek obdélníkového otvoru.
 	var tunnel := MeshInstance3D.new()
-	tunnel.mesh = _tube_mesh(TUNNEL_R, 4.6, 13.2, 64)
+	tunnel.mesh = _tube_mesh(TUNNEL_R, 4.0, 13.8, 64)
 	tunnel.material_override = tile_mat
 	tunnel.set_instance_shader_parameter("tint", Color(0.7, 0.82, 0.86))
 	tunnel.set_instance_shader_parameter("tile_scale", 1.5)
 	tunnel.set_instance_shader_parameter("mesh_uv", 1.0)
 	tunnel.position = Vector3(0.0, TUNNEL_Y, -52.0)
 	add_child(tunnel)
-	for end_x in [4.6, 13.2]:
+	# Čelní stěny přímo v líci zdí místností (dlaždice navazují): ve zdi je jen kulatý otvor.
+	# [x, barva a měřítko dlaždic zdi té místnosti]: Bufet, Atrium
+	for end in [[3.995, Color(0.9, 0.86, 0.72), 1.0], [13.805, Color(0.88, 0.9, 0.86), 0.8]]:
+		var end_x: float = end[0]
 		var cap := MeshInstance3D.new()
-		cap.mesh = _tube_cap(TUNNEL_R, 1.06, -0.36 - TUNNEL_Y, 2.26 - TUNNEL_Y, 48)
+		cap.mesh = _tube_cap(TUNNEL_R, 1.57, -0.36 - TUNNEL_Y, 2.33 - TUNNEL_Y, 64)
 		cap.material_override = tile_mat
-		cap.set_instance_shader_parameter("tint", Color(0.7, 0.82, 0.86))
-		cap.set_instance_shader_parameter("tile_scale", 1.5)
+		cap.set_instance_shader_parameter("tint", end[1])
+		cap.set_instance_shader_parameter("tile_scale", end[2])
 		cap.position = Vector3(end_x, TUNNEL_Y, -52.0)
 		add_child(cap)
-	_collider(Vector3(8.9, 0.8, -53.15), Vector3(8.6, 2.4, 0.3))
-	_collider(Vector3(8.9, 0.8, -50.85), Vector3(8.6, 2.4, 0.3))
-	_collider(Vector3(8.9, 2.25, -52.0), Vector3(8.6, 0.3, 2.6))
+	_collider(Vector3(8.9, 0.8, -53.15), Vector3(9.8, 2.4, 0.3))
+	_collider(Vector3(8.9, 0.8, -50.85), Vector3(9.8, 2.4, 0.3))
+	_collider(Vector3(8.9, 2.25, -52.0), Vector3(9.8, 0.3, 2.6))
 	_lamp(Vector3(8.9, TUNNEL_Y + TUNNEL_R - 0.06, -52.0), 0.12, 0.3, 0.2, 4.0, true)
 	# -- atrium: vysoký sál s vodopádem, schody na balkon a oknem na anděla
 	_palette = {C_WALL: Color(0.88, 0.9, 0.86), C_FLOOR: Color(0.8, 0.84, 0.8), C_CEIL: Color(0.6, 0.64, 0.62), C_BLUE: Color(0.18, 0.4, 0.3)}
@@ -2179,10 +2173,10 @@ func _build_south_wing() -> void:
 	box(13.8, 30.0, -1.0, -0.35, -56.0, -34.6, C_FLOOR)
 	water(13.2, 30.0, -56.0, -34.0)
 	water(12.6, 13.8, -42.0, -40.0)
-	box(13.2, 13.8, -1.0, 12.0, -56.6, -53.0)
-	box(13.2, 13.8, -1.0, 12.0, -51.0, -42.0)
+	box(13.2, 13.8, -1.0, 12.0, -56.6, -53.55)
+	box(13.2, 13.8, -1.0, 12.0, -50.45, -42.0)
 	box(13.2, 13.8, -1.0, 12.0, -40.0, -34.6)
-	box(13.2, 13.8, 2.2, 12.0, -53.0, -51.0)
+	box(13.2, 13.8, 2.3, 12.0, -53.55, -50.45)
 	box(13.2, 13.8, 2.4, 12.0, -42.0, -40.0)
 	box(30.0, 30.6, -1.0, 12.0, -56.6, -34.6)
 	box(13.2, 30.6, -1.0, 12.0, -56.6, -56.0)

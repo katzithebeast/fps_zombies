@@ -394,12 +394,26 @@ static func vase() -> Node3D:
 				mi.set_surface_override_material(i,leaf)
 	return _fit(src,1.0,0.0)
 
+const CASHIER_H:=2.16          # dvojnásobek původní velikosti (pult ~1,2 m)
+
 static func _size_to(src: Node3D, axis: int, length: float, turn: float) -> Node3D:
 	var b:=_bounds(src)
 	return _fit(src,length/maxf(b.size[axis],0.001),turn)
 
 static func cashier() -> Node3D:
-	return _size_to(load(DIR+"cashier/source/model.gltf").instantiate(),1,1.08,0.0)
+	# Model má materiál s ořezem podle alfy, ale alfa v textuře není průhlednost
+	# (92 % je pod prahem) → mizely kusy pultu. Materiál natvrdo neprůhledný.
+	var src: Node3D=load(DIR+"cashier/source/model.gltf").instantiate()
+	for m in src.find_children("*","MeshInstance3D",true,false):
+		var mi: MeshInstance3D=m
+		for si in mi.mesh.get_surface_count():
+			var mat=mi.get_active_material(si)
+			if mat is BaseMaterial3D:
+				var opaque: BaseMaterial3D=(mat as BaseMaterial3D).duplicate()
+				opaque.transparency=BaseMaterial3D.TRANSPARENCY_DISABLED
+				opaque.cull_mode=BaseMaterial3D.CULL_DISABLED
+				mi.set_surface_override_material(si,opaque)
+	return _size_to(src,1,CASHIER_H,0.0)
 
 static func lounger() -> Node3D:
 	var src: Node3D=load(DIR+"lounger/source/lounger.fbx").instantiate()
