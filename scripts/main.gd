@@ -2151,26 +2151,28 @@ func _build_south_wing() -> void:
 	_tile_mul = 1.5
 	box(4.6, 13.8, -1.0, -0.35, -53.0, -51.0, C_FLOOR)
 	water(4.0, 13.8, -53.0, -51.0)
-	var tube_mesh := CylinderMesh.new()
-	tube_mesh.top_radius = 1.4
-	tube_mesh.bottom_radius = 1.4
-	tube_mesh.height = 8.6
-	tube_mesh.radial_segments = 28
-	tube_mesh.cap_top = false
-	tube_mesh.cap_bottom = false
-	tube_mesh.flip_faces = true
+	# Kulatá trubka s vlastním mapováním: dlaždice obíhají dokola (ve stropě se netáhnou)
+	# a na obou koncích čelní stěna s kruhovým výřezem zakryje zbytek obdélníkového otvoru.
 	var tunnel := MeshInstance3D.new()
-	tunnel.mesh = tube_mesh
+	tunnel.mesh = _tube_mesh(TUNNEL_R, 4.6, 13.2, 64)
 	tunnel.material_override = tile_mat
 	tunnel.set_instance_shader_parameter("tint", Color(0.7, 0.82, 0.86))
 	tunnel.set_instance_shader_parameter("tile_scale", 1.5)
-	tunnel.position = Vector3(8.9, 0.5, -52.0)
-	tunnel.rotation.z = PI / 2
+	tunnel.set_instance_shader_parameter("mesh_uv", 1.0)
+	tunnel.position = Vector3(0.0, TUNNEL_Y, -52.0)
 	add_child(tunnel)
+	for end_x in [4.6, 13.2]:
+		var cap := MeshInstance3D.new()
+		cap.mesh = _tube_cap(TUNNEL_R, 1.06, -0.36 - TUNNEL_Y, 2.26 - TUNNEL_Y, 48)
+		cap.material_override = tile_mat
+		cap.set_instance_shader_parameter("tint", Color(0.7, 0.82, 0.86))
+		cap.set_instance_shader_parameter("tile_scale", 1.5)
+		cap.position = Vector3(end_x, TUNNEL_Y, -52.0)
+		add_child(cap)
 	_collider(Vector3(8.9, 0.8, -53.15), Vector3(8.6, 2.4, 0.3))
 	_collider(Vector3(8.9, 0.8, -50.85), Vector3(8.6, 2.4, 0.3))
-	_collider(Vector3(8.9, 2.05, -52.0), Vector3(8.6, 0.3, 2.6))
-	_lamp(Vector3(8.9, 1.86, -52.0), 0.12, 0.3, 0.2, 4.0, true)
+	_collider(Vector3(8.9, 2.25, -52.0), Vector3(8.6, 0.3, 2.6))
+	_lamp(Vector3(8.9, TUNNEL_Y + TUNNEL_R - 0.06, -52.0), 0.12, 0.3, 0.2, 4.0, true)
 	# -- atrium: vysoký sál s vodopádem, schody na balkon a oknem na anděla
 	_palette = {C_WALL: Color(0.88, 0.9, 0.86), C_FLOOR: Color(0.8, 0.84, 0.8), C_CEIL: Color(0.6, 0.64, 0.62), C_BLUE: Color(0.18, 0.4, 0.3)}
 	_tile_mul = 0.8
@@ -3455,3 +3457,53 @@ func _run_test() -> void:
 		img.save_png(out.path_join(parts[0] + ".png"))
 		print("SHOT ", parts[0], " pos=", player.global_position, " swim=", player.swimming, " crouch=", player.crouching)
 	get_tree().quit()
+
+
+# --- kulatý tunel (Bufet → Atrium)
+const TUNNEL_R := 1.5
+const TUNNEL_Y := 0.75      # osa trubky; vrchol 2,25 m, u podlahy (-0,35) široká ~2 m
+
+func _tube_mesh(r: float, x0: float, x1: float, seg: int) -> ArrayMesh:
+	# Vnitřek trubky podél osy X. UV v metrech: u = oblouk dokola, v = délka.
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rings := maxi(2, int(ceil((x1 - x0) / 0.5)) + 1)
+	for i in seg:
+		for j in rings - 1:
+			var a0 := TAU * float(i) / seg
+			var a1 := TAU * float(i + 1) / seg
+			var xa := lerpf(x0, x1, float(j) / (rings - 1))
+			var xb := lerpf(x0, x1, float(j + 1) / (rings - 1))
+			var quad := [[a0, xa], [a1, xa], [a1, xb], [a0, xb]]
+			for k in [0, 2, 1, 0, 3, 2]:
+				var a: float = quad[k][0]
+				var x: float = quad[k][1]
+				var radial := Vector3(0, sin(a), cos(a))
+				st.set_normal(-radial)
+				st.set_uv(Vector2(a * r, x))
+				st.add_vertex(Vector3(x, 0, 0) + radial * r)
+	st.generate_tangents()
+	return st.commit()
+
+func _tube_cap(r: float, half_w: float, y0: float, y1: float, seg: int) -> ArrayMesh:
+	# Čelní stěna konce tunelu: obdélník otvoru mínus kruh trubky (oboustranná).
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for side in [1.0, -1.0]:
+		for i in seg:
+			var pts: Array = []
+			for a in [TAU * float(i) / seg, TAU * float(i + 1) / seg]:
+				var d := Vector2(cos(a), sin(a))              # x = z, y = výška
+				var t := INF
+				if absf(d.x) > 0.0001: t = minf(t, half_w / absf(d.x))
+				if d.y > 0.0001: t = minf(t, y1 / d.y)
+				elif d.y < -0.0001: t = minf(t, y0 / d.y)
+				var outer: Vector2 = d * maxf(t, r)
+				var inner: Vector2 = d * r
+				pts.append([inner, outer])
+			var tri := [pts[0][0], pts[1][0], pts[1][1], pts[0][0], pts[1][1], pts[0][1]]
+			if side < 0.0: tri.reverse()
+			for p2 in tri:
+				st.set_normal(Vector3(side, 0, 0))
+				st.add_vertex(Vector3(0, (p2 as Vector2).y, (p2 as Vector2).x))
+	return st.commit()

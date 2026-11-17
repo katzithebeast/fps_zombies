@@ -26,6 +26,7 @@ uniform float normal_depth = 1.0;
 
 instance uniform vec3 tint : source_color = vec3(1.0);
 instance uniform float tile_scale = 1.0;
+instance uniform float mesh_uv = 0.0;     // 1 = mapování z modelu (zaoblené plochy: tunel), jinak podle směru plochy
 
 varying vec3 wpos;
 
@@ -39,7 +40,8 @@ void vertex() {
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	vec3 an = abs(NORMAL);
 	// BINORMAL míří proti směru V (konvence OpenGL normálových map, kterou Godot čeká)
-	if (an.y > 0.5) { UV = wpos.xz; TANGENT = vec3(1.0, 0.0, 0.0); BINORMAL = vec3(0.0, 0.0, -1.0); }
+	if (mesh_uv > 0.5) { /* UV v metrech a tečny bere z modelu */ }
+	else if (an.y > 0.5) { UV = wpos.xz; TANGENT = vec3(1.0, 0.0, 0.0); BINORMAL = vec3(0.0, 0.0, -1.0); }
 	else if (an.x > 0.5) { UV = wpos.zy; TANGENT = vec3(0.0, 0.0, 1.0); BINORMAL = vec3(0.0, -1.0, 0.0); }
 	else { UV = wpos.xy; TANGENT = vec3(1.0, 0.0, 0.0); BINORMAL = vec3(0.0, -1.0, 0.0); }
 }

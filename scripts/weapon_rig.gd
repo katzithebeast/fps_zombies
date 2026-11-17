@@ -45,6 +45,10 @@ var full: Node3D
 var first: Node3D
 var _time := 0.0
 var _flash_time := 0.0
+const FLASH_TIME:=0.04
+const FLASH_BASE:=Color(1.35,1.15,0.95)
+const SMOKE_POOL:=6
+var _smoke_next:=0
 var _flashes: Array[Node3D] = []
 var right_error := 0.0
 var left_error := 0.0
@@ -238,6 +242,11 @@ func set_gun(name: String, draw: bool=true) -> void:
 	for flash in _flashes:
 		flash.position=muzzle
 		flash.scale=Vector3.ONE*float(info.flash)
+	for holder in [full,first]:
+		if holder==null: continue
+		for i in SMOKE_POOL:
+			var sm: Node3D=holder.get_node_or_null("smoke%d"%i)
+			if sm: sm.position=muzzle+Vector3(0,0,-0.03)
 	if _light: _light.position=muzzle+Vector3(0,0,-0.15)
 	_update_flash_tint()
 	_full_reload=null
@@ -266,44 +275,97 @@ func make_gun(layer: int) -> Node3D:
 	bomb.add_child(pk)
 	gun.add_child(bomb)
 	for mesh in gun.find_children("*","MeshInstance3D",true,false): mesh.layers=layer
-	# Záblesk: tři zkřížené plochy s měkkým přechodem a čelní kotouč, aditivně.
+	# Záblesk: čelní zubatá hvězda + tři zkřížené boční plameny (každá rána jiná varianta z atlasu).
 	var flash:=Node3D.new()
 	flash.position=muzzle
-	var gradient:=Gradient.new()
-	gradient.offsets=PackedFloat32Array([0.0,0.25,0.6,1.0])
-	gradient.colors=PackedColorArray([Color(1,0.97,0.85,1),Color(1,0.75,0.3,0.9),Color(1,0.4,0.08,0.35),Color(1,0.3,0.0,0.0)])
-	var texture:=GradientTexture2D.new()
-	texture.gradient=gradient
-	texture.fill=GradientTexture2D.FILL_RADIAL
-	texture.fill_from=Vector2(0.5,0.5)
-	texture.fill_to=Vector2(1.0,0.5)
-	texture.width=64
-	texture.height=64
-	var mat:=StandardMaterial3D.new()
-	mat.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode=BaseMaterial3D.BLEND_MODE_ADD
-	mat.cull_mode=BaseMaterial3D.CULL_DISABLED
-	mat.albedo_texture=texture
-	mat.albedo_color=Color(3.0,2.2,1.4)
-	mat.disable_fog=true
+	var star_tex: Texture2D=load("res://assets/fx/muzzle_star.png")
+	var side_tex: Texture2D=load("res://assets/fx/muzzle_side.png")
 	for i in 4:
+		var mat:=StandardMaterial3D.new()
+		mat.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.blend_mode=BaseMaterial3D.BLEND_MODE_ADD
+		mat.cull_mode=BaseMaterial3D.CULL_DISABLED
+		mat.disable_fog=true
+		mat.disable_receive_shadows=true
+		mat.albedo_texture=star_tex if i==3 else side_tex
+		mat.uv1_scale=Vector3(0.25,1,1)
+		mat.albedo_color=FLASH_BASE
 		var quad:=MeshInstance3D.new()
 		var mesh:=QuadMesh.new()
-		mesh.size=Vector2(0.13,0.3) if i<3 else Vector2(0.17,0.17)
+		mesh.size=Vector2(0.27,0.27) if i==3 else Vector2(0.44,0.17)
 		quad.mesh=mesh
 		quad.material_override=mat
 		quad.layers=layer
 		quad.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if i<3:
-			quad.rotation=Vector3(-PI/2,0,0)
-			quad.position=Vector3(0,0,-0.11)
+			# plocha podél hlavně: levý okraj textury (ústí) přesně na ústí
+			quad.rotation=Vector3(0,PI/2,0)
+			quad.position=Vector3(0,0,-0.215)
+			quad.name="side"
 			var holder:=Node3D.new()
 			holder.rotation.z=i*PI/3.0
 			holder.add_child(quad)
 			flash.add_child(holder)
 		else:
+			quad.position=Vector3(0,0,-0.015)
+			quad.name="star"
 			flash.add_child(quad)
+	# Kouř z hlavně: pár obláčků, které zůstanou viset ve vzduchu (střídá se několik emitorů).
+	var smoke_tex: Texture2D=load("res://assets/fx/smoke_puff.png")
+	var smoke_mat:=StandardMaterial3D.new()
+	smoke_mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
+	smoke_mat.billboard_mode=BaseMaterial3D.BILLBOARD_PARTICLES
+	smoke_mat.vertex_color_use_as_albedo=true
+	smoke_mat.albedo_texture=smoke_tex
+	smoke_mat.albedo_color=Color(0.78,0.78,0.76)
+	smoke_mat.roughness=1.0
+	smoke_mat.disable_receive_shadows=true
+	var smoke_pm:=ParticleProcessMaterial.new()
+	smoke_pm.direction=Vector3(0,0,-1)
+	smoke_pm.spread=16.0
+	smoke_pm.initial_velocity_min=0.35
+	smoke_pm.initial_velocity_max=1.1
+	smoke_pm.damping_min=1.4
+	smoke_pm.damping_max=2.4
+	smoke_pm.gravity=Vector3(0,0.22,0)
+	smoke_pm.angle_min=-180.0
+	smoke_pm.angle_max=180.0
+	smoke_pm.angular_velocity_min=-25.0
+	smoke_pm.angular_velocity_max=25.0
+	smoke_pm.scale_min=0.7
+	smoke_pm.scale_max=1.2
+	var grow:=Curve.new()
+	grow.add_point(Vector2(0.0,0.35))
+	grow.add_point(Vector2(1.0,1.0))
+	var grow_tex:=CurveTexture.new()
+	grow_tex.curve=grow
+	smoke_pm.scale_curve=grow_tex
+	var fade:=Gradient.new()
+	fade.offsets=PackedFloat32Array([0.0,0.15,1.0])
+	fade.colors=PackedColorArray([Color(1,1,1,0.0),Color(1,1,1,0.2),Color(1,1,1,0.0)])
+	var fade_tex:=GradientTexture1D.new()
+	fade_tex.gradient=fade
+	smoke_pm.color_ramp=fade_tex
+	var smoke_quad:=QuadMesh.new()
+	smoke_quad.size=Vector2(0.12,0.12)
+	smoke_quad.material=smoke_mat
+	for i in SMOKE_POOL:
+		var sm:=GPUParticles3D.new()
+		sm.name="smoke%d"%i
+		sm.amount=4
+		sm.lifetime=1.2
+		sm.one_shot=true
+		sm.explosiveness=0.85
+		sm.local_coords=false
+		sm.emitting=false
+		sm.process_material=smoke_pm
+		sm.draw_pass_1=smoke_quad
+		sm.layers=layer
+		sm.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		sm.visibility_aabb=AABB(Vector3(-3,-3,-3),Vector3(6,6,6))
+		sm.position=muzzle+Vector3(0,0,-0.03)
+		gun.add_child(sm)
 	flash.visible=false
 	gun.add_child(flash)
 	_flashes.append(flash)
@@ -320,8 +382,8 @@ func _make_sound(file: String, volume: float) -> AudioStreamPlayer3D:
 
 func set_remote_layers() -> void:
 	_remote=true
-	for mesh in full.find_children("*","MeshInstance3D",true,false): mesh.layers=16
-	for mesh in first.find_children("*","MeshInstance3D",true,false): mesh.layers=0
+	for mesh in full.find_children("*","GeometryInstance3D",true,false): mesh.layers=16
+	for mesh in first.find_children("*","GeometryInstance3D",true,false): mesh.layers=0
 
 func muzzle_global() -> Vector3:
 	var holder:=full if _remote or avatar.first_mesh.layers==0 else first
@@ -338,10 +400,27 @@ func kick() -> void:
 	# Kamera se při ráně krátce natočí (u těžkých zbraní víc).
 	var p=avatar.get_parent()
 	if p and "_roll" in p: p._roll+=randf_range(-1.0,1.0)*float(r.cam_roll)*recoil_scale
-	_flash_time=0.05
+	_flash_time=FLASH_TIME
+	var side_f:=randi()%4
+	var star_f:=randi()%4
+	var len_k:=randf_range(0.75,1.3)
+	var wid_k:=randf_range(0.85,1.15)
 	for flash in _flashes:
 		flash.rotation.z=randf()*TAU
-		flash.scale=Vector3.ONE*randf_range(0.8,1.25)
+		flash.scale=Vector3(wid_k,wid_k,len_k)*float(_gi().flash)
+		for q in flash.find_children("*","MeshInstance3D",true,false):
+			var m:=(q as MeshInstance3D).material_override as StandardMaterial3D
+			if m==null: continue
+			var f:=star_f if q.name=="star" else (side_f+q.get_index()+int(q.get_parent().rotation.z*2.0))%4
+			m.uv1_offset=Vector3(0.25*f,0,0)
+	# Obláček kouře z hlavně (oba držáky, každá kamera vidí svůj).
+	if float(_gi().flash)>0.0:
+		for holder in [full,first]:
+			var sm: GPUParticles3D=holder.get_node_or_null("smoke%d"%_smoke_next)
+			if sm:
+				sm.amount=3 if aim>0.5 else 4
+				sm.restart()
+		_smoke_next=(_smoke_next+1)%SMOKE_POOL
 	if _light: _light.light_energy=randf_range(2.2,3.2)*float(_gi().flash)
 	if _gi().shell!=Vector3.ZERO: _eject_shell(_gi().shell)
 
@@ -509,6 +588,11 @@ func pose(dt: float, swimming: bool) -> void:
 	_aim_last=aim
 	_aim_roll=lerpf(_aim_roll,clampf(aim_rate*0.05,-0.12,0.12),1.0-exp(-12.0*dt))
 	_flash_time=maxf(0,_flash_time-dt)
+	if _flash_time>0.0:
+		var fk:=_flash_time/FLASH_TIME          # 1 → 0: záblesk se rozšíří a zhasne
+		for flash in _flashes:
+			for q in flash.find_children("*","MeshInstance3D",true,false):
+				(q as MeshInstance3D).transparency=1.0-pow(fk,0.7)
 	if _light: _light.light_energy=move_toward(_light.light_energy,0.0,dt*45.0)
 	_update_shells(dt)
 	_update_drops(dt)
@@ -1143,7 +1227,7 @@ func _update_flash_tint() -> void:
 	for flash in _flashes:
 		for q in flash.find_children("*","MeshInstance3D",true,false):
 			var m:=(q as MeshInstance3D).material_override as StandardMaterial3D
-			if m: m.albedo_color=Color(3.0,2.2,1.4) if t==0 else Color(0.8+col.r*2.4,0.8+col.g*2.4,0.8+col.b*2.4)
+			if m: m.albedo_color=FLASH_BASE if t==0 else Color(0.6+col.r*2.0,0.6+col.g*2.0,0.6+col.b*2.0)
 	if _light: _light.light_color=col
 
 
