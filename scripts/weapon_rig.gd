@@ -117,6 +117,13 @@ var _aim_last:=0.0
 var _aim_roll:=0.0
 # Váha zbraně v rukou (bez míření): pružiny s překmitem místo prostého dotahování.
 var sway_scale:=1.0                # nastavení „Kývání zbraně“
+var obstruct:=0.0                  # 0..1 jak moc zbraň narazila před sebou do zdi (nastavuje player_weapon)
+var _ob:=0.0
+var _ob_v:=0.0
+var air_vy:=0.0                    # svislá rychlost ve vzduchu (0 na zemi)
+var _air:=Vector2.ZERO             # x posun nahoru/dolů, y náklon hlavně
+var _air_v:=Vector2.ZERO
+var _foot_idx:=0
 var crouch_now:=false
 var _sway_v:=Vector2.ZERO
 var _tilt_v:=0.0
@@ -672,6 +679,28 @@ func pose(dt: float, swimming: bool) -> void:
 	var bob_roll:=cos(sp)*0.032*gait
 	var bob_yaw:=cos(sp)*0.022*gait
 	var bob_pitch:=(dip-0.5)*0.03*gait
+	# Došlap: krátké „ťuknutí“ při dopadu chodidla a náklon k noze, která došlápla
+	# (hladké houpání nahoře ho samo neumí – skutečný krok má na patě malý náraz).
+	var foot:=floori((sp-PI*0.5)/PI)
+	if foot!=_foot_idx:
+		var forward_step: bool=foot>_foot_idx
+		_foot_idx=foot
+		var g:=clampf(gait,0.0,1.4)*(1.0-aim*0.75)*calm*(1.0+run*0.6)
+		if forward_step and g>0.08:
+			var side:=1.0 if foot%2==0 else -1.0
+			impulse(Vector3(0.0,-0.085,0.02)*g,Vector3(-0.16,0.03*side,0.11*side)*g)
+	# Ve vzduchu: při výskoku zbraň zaostane dolů a hlaveň klesne, při pádu „vyplave“ nahoru.
+	var air_goal:=Vector2(clampf(-air_vy*0.0035,-0.022,0.03),clampf(-air_vy*0.012,-0.09,0.1))*calm*k_sw
+	var w_air:=9.0
+	_air_v+=((air_goal-_air)*w_air*w_air-_air_v*2.0*0.7*w_air)*dt
+	_air+=_air_v*dt
+	# Zbraň u zdi: stáhne se k tělu a hlaveň se zvedne, ať neprojíždí stěnou.
+	var w_ob:=14.0
+	_ob_v+=((obstruct-_ob)*w_ob*w_ob-_ob_v*2.0*0.85*w_ob)*dt
+	_ob=clampf(_ob+_ob_v*dt,-0.05,2.1)
+	var obk:=smoothstep(0.0,1.0,clampf(_ob,0.0,1.0))
+	var ob_more:=maxf(_ob-1.0,0.0)          # úplně u zdi: zbraň se odkloní ven a zvedne
+	var ob_long:=clampf((absf(float(_gi().muzzle.z))-0.6)/0.3,0.0,1.0)   # dlouhá hlaveň (IŽ-54) potřebuje víc
 	# Dech: v klidu pomalá osmička; po sprintu se rozdýchává víc a rychleji.
 	_breath_boost=move_toward(_breath_boost,1.0,dt*0.5) if run>0.5 else move_toward(_breath_boost,0.0,dt*0.45)
 	var bb:=_breath_boost*_breath_boost
@@ -699,13 +728,17 @@ func pose(dt: float, swimming: bool) -> void:
 	offset+=Vector3(SPRINT_MOVE.x,SPRINT_MOVE.y,SPRINT_MOVE.z)*run+Vector3(0.03,0.02,0.15)*jab
 	# zpětný ráz (posun) + pohyb + vytažení zbraně
 	offset+=Vector3(_rk_p.x,_rk_p.y,0)+Vector3(0,0,-_move_push*calm)
+	offset+=Vector3(0,_air.x,0)+Vector3(0.015,-0.035,-0.15)*obk+Vector3(-0.07,-0.07,-0.03)*ob_more
 	var draw_k:=_draw*_draw*(3.0-2.0*_draw)
 	var lower:=maxf(draw_k,holster)
 	offset+=Vector3(0.08,-0.65,-0.12)*lower
 	var tilt:=Basis(Vector3.RIGHT,-pitch-aim*0.015)
 	var extra_roll:=_move_tilt*calm*(1.0-aim*0.6)+bob_roll+_aim_roll+0.45*lower+_idle_drift.z
-	var extra_pitch:=-0.65*lower+bob_pitch+breathe_pitch
-	var local:=Basis(Vector3.UP,_kick.y+bob_yaw+_sway.x*1.2*calm+lerpf(HIP_YAW,0.0,aim)+SPRINT_YAW*run-0.3*jab)*Basis(Vector3.RIGHT,_kick.x+r_pitch-_sway.y*0.8*calm+SPRINT_PITCH*run+0.1*jab+extra_pitch)*Basis(Vector3.FORWARD,_kick.z-_sway.x*1.5*calm+r_roll+lerpf(HIP_ROLL,0.0,aim)+SPRINT_ROLL*run-0.5*jab+extra_roll)
+	var extra_pitch:=-0.65*lower+bob_pitch+breathe_pitch+_air.y+0.8*obk+(0.25+0.35*ob_long)*ob_more
+	# Těžká hlaveň: při rozjezdu do strany zaostává víc než ruce (vybočí), při brzdění se přehoupne.
+	var inertia_yaw:=-_inertia_offset.x*2.6*calm*(1.0-aim*0.85)
+	extra_roll+=0.22*obk+0.35*ob_more
+	var local:=Basis(Vector3.UP,_kick.y+inertia_yaw+0.12*obk-(0.55+0.35*ob_long)*ob_more+bob_yaw+_sway.x*1.2*calm+lerpf(HIP_YAW,0.0,aim)+SPRINT_YAW*run-0.3*jab)*Basis(Vector3.RIGHT,_kick.x+r_pitch-_sway.y*0.8*calm+SPRINT_PITCH*run+0.1*jab+extra_pitch)*Basis(Vector3.FORWARD,_kick.z-_sway.x*1.5*calm+r_roll+lerpf(HIP_ROLL,0.0,aim)+SPRINT_ROLL*run-0.5*jab+extra_roll)
 	# Model míří do +Z; záporný úhel kolem X zvedá hlaveň.
 	var gun_basis:=tilt*Basis(Vector3.UP,PI)*local
 	var position_now:=pivot+tilt*(offset-pivot)+tilt*Vector3(0,0,-recoil)

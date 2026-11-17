@@ -80,7 +80,7 @@ const BASE_EXPOSURE := 1.0
 const MENU_VIEW := [Vector3(8.6, -0.35, -4.6), 52.0, -3.0]      # pozadí hlavního menu: pohled na bazén
 const SETTINGS_PATH := "user://settings.cfg"
 var settings := {
-	"window": 0, "vsync": true, "upscale": 0, "sharpen": 0.4, "brightness": 1.0, "fov": 75.0, "show_fps": false, "crosshair_on": false, "water_glow": true,
+	"window": 0, "vsync": true, "upscale": 0, "sharpen": 0.4, "brightness": 1.0, "fov": 75.0, "show_fps": false, "crosshair_on": false, "hitmarker": true, "hit_sound": true, "water_glow": true,
 	"preset": 2, "gi": true, "ssr": true, "planar": 1, "volumetric": true, "dust": true, "shadows": 3, "ao": true,
 	"bloom": 0.3, "dof": true, "grain": 0.35, "vignette": 0.5,
 	"mouse": 1.0, "bob": 1.0, "gun_sway": 1.0, "aim_sway": 0.1, "shake": 1.0, "vhs": false, "fisheye": false, "volume": 0.8, "music": 0.35, "flash_size": 30.0, "flash_flicker": true, "horror": false, "intro": true, "mini_range": 20.0, "mini_size": 300.0, "mini_pos": 0, "mini_line": 2, "mini_margin": 110.0, "recoil": 1.0, "gun_master": 0.0, "gun_bass": 0.0, "gun_echo": 1.0, "gun_ak_vol": 0.0, "gun_ak_bass": 0.0, "gun_ak_echo": 0.35, "gun_ak_pitch": 1.0, "gun_mp40_vol": 0.0, "gun_mp40_bass": 0.0, "gun_mp40_echo": 0.35, "gun_mp40_pitch": 1.0, "gun_izh54_vol": 0.0, "gun_izh54_bass": 0.0, "gun_izh54_echo": 0.35, "gun_izh54_pitch": 1.0, "gun_deagle_vol": 0.0, "gun_deagle_bass": 0.0, "gun_deagle_echo": 0.35, "gun_deagle_pitch": 1.0,
@@ -3075,6 +3075,9 @@ var _marker_tween: Tween
 var _marker_sounds: Dictionary={}
 
 func _hit_marker(lethal: bool, head: bool) -> void:
+	var show_mark: bool=bool(settings.get("hitmarker",true))
+	var play_sound: bool=bool(settings.get("hit_sound",true))
+	if not show_mark and not play_sound: return
 	if _marker==null:
 		_marker=Control.new()
 		_marker.set_anchors_preset(Control.PRESET_CENTER)
@@ -3096,6 +3099,7 @@ func _hit_marker(lethal: bool, head: bool) -> void:
 			sound.volume_db=-7.0
 			add_child(sound)
 			_marker_sounds[name]=sound
+	_marker.visible=show_mark
 	_marker.modulate=Color(1.0,0.16,0.12,1.0) if lethal else Color(1,1,1,1)
 	_marker.scale=Vector2.ONE*(1.7 if lethal else 1.35)
 	if _marker_tween: _marker_tween.kill()
@@ -3103,7 +3107,7 @@ func _hit_marker(lethal: bool, head: bool) -> void:
 	_marker_tween.tween_property(_marker,"scale",Vector2.ONE,0.12).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 	_marker_tween.tween_property(_marker,"modulate:a",0.0,0.5 if lethal else 0.28).set_delay(0.08)
 	var sound: AudioStreamPlayer=_marker_sounds["hit_kill" if lethal else "hit_marker"]
-	if sound.stream:
+	if play_sound and sound.stream:
 		sound.pitch_scale=(1.15 if head else 1.0)*randf_range(0.97,1.03)
 		sound.play()
 

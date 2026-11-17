@@ -80,6 +80,7 @@ func _ready() -> void:
 	for key in STATS: clips[key]=[STATS[key].mag,STATS[key].reserve]
 
 var upgraded:={}          # vylepšené zbraně z pracovního stolu
+var wall_react:=true      # zbraň reaguje na zeď před sebou (vypíná jen test)
 var debug_ammo:=false     # testování: zásobník se neprázdní
 var baptizing:=""         # zbraň právě leží v andělově vodě (nedá se vytáhnout)
 var item_held:=""         # předmět v ruce místo zbraně (injekce)
@@ -125,6 +126,25 @@ func _play_zap() -> void:
 		_shimmer_cd=0.4
 		_shimmer_sound.pitch_scale=randf_range(0.95,1.08)
 		_shimmer_sound.play()
+
+func _wall_ahead(rig: Node) -> float:
+	# Jak blízko před zbraní je zeď: 0 = volno, 1 = hlaveň by byla celá ve zdi.
+	var cam: Camera3D=player.camera
+	if cam==null or not cam.is_inside_tree(): return 0.0
+	var reach: float=absf(float(rig._gi().muzzle.z))+0.32      # od oka k ústí hlavně
+	var fwd: Vector3=-cam.global_basis.z
+	var right: Vector3=cam.global_basis.x
+	var up: Vector3=cam.global_basis.y
+	var space:=player.get_world_3d().direct_space_state
+	var nearest:=reach
+	# Střed pohledu + místo, kde zbraň skutečně je (vpravo dole), + mezi nimi.
+	for o in [Vector3.ZERO, right*0.14-up*0.2, right*0.07-up*0.1]:
+		var from: Vector3=cam.global_position+o*(1.0-aim_amount*0.8)
+		var q:=PhysicsRayQueryParameters3D.create(from,from+fwd*reach,1)
+		var hit:=space.intersect_ray(q)
+		if not hit.is_empty(): nearest=minf(nearest,from.distance_to(hit.position))
+	# Delší zbraň musí reagovat dřív; úplně u zdi (přes 1) se ještě víc stáhne.
+	return clampf((reach-nearest)/(reach*0.42),0.0,2.0)
 
 func _apply_look() -> void:
 	# Pokřtěné zbraně: kamufláž a záře v rukou, rychlejší přebíjení.
@@ -517,6 +537,8 @@ func update(dt: float) -> void:
 	rig.local_velocity=Basis(Vector3.UP,-player.yaw)*player.velocity
 	rig.step_phase=player._bob_phase
 	rig.crouch_now=player.crouching
+	rig.air_vy=0.0 if (player.is_on_floor() or player.swimming) else player.velocity.y
+	rig.obstruct=_wall_ahead(rig) if (equipped and wall_react and not player.swimming) else 0.0
 	if item_held!="": _update_item(dt)
 	# Dopad ze skoku/pádu: zbraň se propadne a hlaveň klesne.
 	var on_floor_now: bool=player.is_on_floor()

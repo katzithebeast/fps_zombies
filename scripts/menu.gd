@@ -157,6 +157,8 @@ func _ready() -> void:
 	_check(t, "VHS kamera  (klávesa V)", "vhs")
 	_check(t, "Rybí oko  (klávesa G)", "fisheye")
 	_check(t, "Zaměřovač", "crosshair_on")
+	_check(t, "Hitmarker při zásahu (křížek)", "hitmarker")
+	_check(t, "Zvuk zásahu", "hit_sound")
 	_slider(t, "Velikost světla baterky", "flash_size", 15.0, 70.0, 1.0, "%d°")
 	_check(t, "Baterka občas problikne", "flash_flicker")
 	_slider(t, "Síla rybího oka", "fisheye_strength", 0.0, 1.0, 0.05)
