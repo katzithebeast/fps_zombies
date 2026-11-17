@@ -159,12 +159,14 @@ func _boom() -> void:
 	var kills := 0
 	for z in ZombieScript.crowd.duplicate():
 		if not is_instance_valid(z) or z.dead: continue
-		var zc: Vector3 = z.global_position + Vector3.UP
-		var d := zc.distance_to(center)
-		if d > BLAST_RADIUS: continue
-		var push: Vector3 = (zc - center).normalized() + Vector3.UP * 0.8
-		z.hit(randi() % 8, zc, push.normalized(), 2.8 * (1.0 - d / BLAST_RADIUS * 0.5), 99999.0)
+		if (z.global_position + Vector3.UP).distance_to(center) > BLAST_RADIUS: continue
+		# Dřív náhodná kost 0–7: část z nich nemá fyzikální těleso a zombie výbuch přežila.
+		z.blast(center, BLAST_RADIUS, 7.5)
 		kills += 1
+	# Ležící těla výbuch rozhází taky.
+	for z in ZombieScript.corpses.duplicate():
+		if is_instance_valid(z) and (z.global_position + Vector3.UP * 0.3).distance_to(center) < BLAST_RADIUS:
+			z.blast(center, BLAST_RADIUS, 6.0)
 	if mode and kills > 0:
 		mode.points += 60 * kills
 		mode._popup("+%d" % (60 * kills), true)

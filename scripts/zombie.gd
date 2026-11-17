@@ -47,6 +47,14 @@ const ATTACK_HIT:=1.05           # okamžik úderu v klipu (s)
 const ATTACK_END:=1.65
 const CORPSE_TIME:=14.0
 static var crowd: Array=[]
+static var corpses: Array=[]          # mrtvá těla (výbuch s nimi pohne)
+static var wall_guard:=true           # části těla se při animacích nedostanou do zdí
+# Body těla hlídané proti zdem: [těleso, konec kapsle (-1 začátek, 0 střed, 1 konec), poloměr, kdo opraví]
+const WALL_PROBES:=[["Head",0,0.11,"body"],["Head",1,0.105,"body"],["Spine2",0,0.15,"body"],["Hips",0,0.14,"body"],
+	["LeftLeg",-1,0.07,"body"],["RightLeg",-1,0.07,"body"],["LeftFoot",1,0.065,"body"],["RightFoot",1,0.065,"body"],
+	["LeftForeArm",-1,0.06,"Left"],["RightForeArm",-1,0.06,"Right"],["LeftHand",1,0.05,"Left"],["RightHand",1,0.05,"Right"]]
+const WATER_LIFT:=0.55                # vztlak mrtvého těla (podíl tíhy), tělo pod hladinou klesá pomalu
+const WATER_DRAG:=3.5                 # odpor vody (1/s)
 static var _shared_materials: Dictionary={}
 static var _eye_material: StandardMaterial3D
 static var water_level:=-1000.0
@@ -332,6 +340,7 @@ func _build_part(bone_name: String, end_name: String, radius: float, mass_now: f
 
 func _exit_tree() -> void:
 	crowd.erase(self)
+	corpses.erase(self)
 
 func _play(clip: String, speed: float) -> void:
 	_clip_speed=speed
@@ -377,6 +386,7 @@ func _physics_process_timed(dt: float) -> void:
 				body.apply_impulse(impact[2],(impact[1]-body.global_position).limit_length(0.4))
 		_pending_impacts.clear()
 		_death_time+=dt
+		_water_forces()
 		_drive_muscles()
 		_impact_sounds(dt)
 		return
@@ -391,6 +401,7 @@ func _physics_process_timed(dt: float) -> void:
 	_animation.advance(dt*_clip_speed*(_gait_factor if _clip in ["walk","run","crawl","crawl_fast"] else 1.0))
 	_look(dt)
 	_update_reactions(dt)
+	if wall_guard: _keep_out_of_walls()
 	_sample_pose_motion(dt)
 	for area in hitboxes:
 		if area.collision_layer!=0:
@@ -461,6 +472,8 @@ func _move(step: Vector3) -> void:
 	var space:=get_world_3d().direct_space_state
 	var dt:=get_physics_process_delta_time()
 	var low:=_is_low()
+	# Zeď, od které ochrana právě odtlačila tělo: do ní se nejde (jinak se o ni zombie klepe).
+	if _wall_hold>0.0 and step.dot(-_wall_n)>0.0: step-=-_wall_n*step.dot(-_wall_n)
 	for part in [Vector3(step.x,0,0),Vector3(0,0,step.z)]:
 		if part.is_zero_approx(): continue
 		_sweep.shape=_capsule_low if low else _capsule
@@ -566,6 +579,7 @@ func _start_ragdoll_fall() -> void:
 		bodies[id].global_transform=(skeleton.global_transform*bone_pose(id)*bodies[id].body_offset).orthonormalized()
 	for id in bodies: _configure_joint(id,false)
 	_add_overlap_exceptions()
+	_pull_bodies_out_of_walls()
 	var push:=_drop*1.6+Vector3.DOWN*0.5
 	for id in bodies:
 		var body: PhysicalBone3D=bodies[id]
@@ -594,6 +608,7 @@ func _update_ragdoll(dt: float) -> void:
 			if Vector2(to.x,to.z).length()<4.5 and absf(to.y)<2.0: wake()
 		return
 	if not _rag_rise:
+		_water_forces()
 		var settled:=_rag_t>1.3 and hips.linear_velocity.length()<0.5
 		if settled or _rag_t>4.0:
 			_begin_rise(hips)
@@ -672,6 +687,8 @@ func _splash_step(amount: float) -> void:
 		sfx.play_at("step_water",global_position,-15.0,0.9)
 
 func _think(dt: float) -> void:
+	_yaw_prev=rotation.y
+	_wall_hold=maxf(0.0,_wall_hold-dt)
 	_velocity=Vector3.ZERO
 	_stagger=maxf(0.0,_stagger-dt)
 	_gait_factor=lerpf(_gait_factor,0.15 if _stagger>0.0 else 1.0,1.0-exp(-(24.0 if _stagger>0.0 else 7.0)*dt))
@@ -822,7 +839,7 @@ func hit(bone: int, point: Vector3, direction: Vector3, strength: float=1.0, dam
 	var weapon_energy:=clampf(sqrt(maxf(damage,1.0)/50.0),0.55,1.65)
 	var impulse:=direction*14.0*strength*weapon_energy*float(TRANSFER[region])
 	if dead:
-		if _frozen: return
+		if _frozen and not _unfreeze(): return
 		_wake()
 		_pending_impacts.append([bone,point,impulse])
 		return
@@ -1030,6 +1047,7 @@ func kill(point: Vector3, impulse: Vector3, bone: int) -> void:
 		bodies[id].global_transform=(skeleton.global_transform*bone_pose(id)*bodies[id].body_offset).orthonormalized()
 	for id in bodies: _configure_joint(id,false)
 	_add_overlap_exceptions()
+	_pull_bodies_out_of_walls()
 	for id in bodies:
 		var body: PhysicalBone3D=bodies[id]
 		var gone:=false
@@ -1043,6 +1061,8 @@ func kill(point: Vector3, impulse: Vector3, bone: int) -> void:
 			body.mass=0.05
 		else:
 			body.collision_layer=32
+		# Rychlé končetiny (brokovnice, výbuch) neprolétnou tenkou zdí.
+		PhysicsServer3D.body_set_enable_continuous_collision_detection(body.get_rid(),true)
 	_injured_bone=bone
 	_style=_region(bone)
 	_muscles.clear()
@@ -1051,6 +1071,7 @@ func kill(point: Vector3, impulse: Vector3, bone: int) -> void:
 		if parent>=0:
 			_muscles.append({"bone":id,"parent":parent,"target":bodies[parent].global_basis.inverse()*bodies[id].global_basis})
 	crowd.erase(self)
+	if not corpses.has(self): corpses.append(self)
 	# Tělo si nese rychlost, kterou zombie běžela.
 	for id in bodies:
 		var body: PhysicalBone3D=bodies[id]
@@ -1105,7 +1126,14 @@ func _impact_sounds(dt: float) -> void:
 func _sink() -> void:
 	# Stará těla se propadnou do podlahy a zmizí, ať jich v hale nepřibývá donekonečna.
 	if not is_inside_tree(): return
+	_sinking=true
+	corpses.erase(self)
+	if not _frozen: _freeze()
+	for body in bodies.values():
+		body.collision_layer=0
+		body.collision_mask=0
 	process_mode=Node.PROCESS_MODE_INHERIT
+	set_physics_process(false)
 	var tween:=create_tween()
 	tween.tween_property(self,"position:y",position.y-1.1,3.0).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_SINE)
 	tween.tween_callback(queue_free)
@@ -1187,9 +1215,10 @@ func _freeze() -> void:
 		var local: Transform3D=poses[parent].affine_inverse()*poses[bone] if parent>=0 else poses[bone]
 		skeleton.set_bone_pose_position(bone,local.origin)
 		skeleton.set_bone_pose_rotation(bone,local.basis.get_rotation_quaternion())
-	for body in bodies.values():
-		body.collision_layer=0
-		body.collision_mask=0
+	# Zapečené tělo jde dál trefit (vrstva 32): zásah ho znovu rozpohybuje (_unfreeze).
+	for id in bodies:
+		bodies[id].collision_layer=0 if _gone(id) else 32
+		bodies[id].collision_mask=0
 	# Odstřelené části zůstanou smrštěné napořád; úprava pózy už není potřeba.
 	for cut in _severed: skeleton.set_bone_pose_scale(cut,Vector3(0.001,0.001,0.001))
 	_gib.active=false
@@ -1197,7 +1226,9 @@ func _freeze() -> void:
 	set_physics_process(false)
 	# Zapečená mrtvola nepotřebuje žádné zpracování (kostra, animace, modifikátory) – jen se kreslí.
 	process_mode=Node.PROCESS_MODE_DISABLED
-	if not keep_corpse: get_tree().create_timer(CORPSE_TIME).timeout.connect(_sink)
+	if not keep_corpse and not _sink_queued:
+		_sink_queued=true
+		get_tree().create_timer(CORPSE_TIME).timeout.connect(_sink)
 
 func _configure_joint(bone: int, update_frame: bool=true) -> void:
 	var body: PhysicalBone3D=bodies[bone]
@@ -1244,3 +1275,189 @@ func _configure_joint(bone: int, update_frame: bool=true) -> void:
 		elif part.ends_with("Arm"): swing=70.0; twist=30.0
 		body.set("joint_constraints/swing_span",swing)
 		body.set("joint_constraints/twist_span",twist)
+
+var _sink_queued:=false
+var _yaw_prev:=0.0
+var _wall_n:=Vector3.ZERO
+var _wall_hold:=0.0
+var _turn_stuck:=0.0
+var _sinking:=false
+
+func _gone(id: int) -> bool:
+	for cut in _severed:
+		if id==cut or _is_descendant(id,cut): return true
+	return false
+
+## Žádná část těla ve zdi: po animaci (výpad, plazení, otáčení u stěny) se tělo, hlava a nohy
+## vytlačí posunem celé zombie (kontrolovaným proti kolizím), paže se o zeď ohnou v rameni
+## a když za zády není místo (úzká chodba), zakloní se trup.
+func _keep_out_of_walls() -> void:
+	if _emerge>0.0: return
+	if is_instance_valid(target) and global_position.distance_squared_to(target.global_position)>900.0: return
+	var space:=get_world_3d().direct_space_state
+	var low:=_is_low()
+	var c:=global_position+Vector3.UP*(0.42 if low else 0.95)
+	var floor_y:=global_position.y+0.08
+	var q:=PhysicsRayQueryParameters3D.new()
+	q.collision_mask=1
+	var push:=Vector3.ZERO
+	var head_hit: Array=[]
+	var body_hits: Array=[]
+	var arm_hits:={}
+	var to_world:=skeleton.global_transform
+	for probe in WALL_PROBES:
+		var id: int=_ids.get(probe[0],-1)
+		if not bodies.has(id) or _gone(id): continue
+		var body: PhysicalBone3D=bodies[id]
+		var t: Transform3D=to_world*bone_pose(id)*body.body_offset
+		var p: Vector3=t.origin+t.basis.y.normalized()*float(body.get_meta("half"))*float(probe[1])
+		p.y=maxf(p.y,floor_y)
+		var dir:=p-c
+		var dist:=dir.length()
+		if dist<0.05: continue
+		dir/=dist
+		var r: float=probe[2]
+		var flat:=Vector3(dir.x,0.0,dir.z)
+		q.from=c
+		q.to=p+(flat.normalized()*r if flat.length_squared()>1e-4 else Vector3.ZERO)
+		var hit:=space.intersect_ray(q)
+		if hit.is_empty(): continue
+		var n: Vector3=hit.normal
+		if absf(n.y)>0.65: continue
+		n.y=0.0
+		n=n.normalized()
+		# Hloubka koule (střed p, poloměr r) za rovinou zdi.
+		var depth: float=(p-hit.position).dot(-n)+r
+		if depth<=0.003: continue
+		# Paže mířící do zdi zhruba kolmo se ohnutím nevyřeší: couvne celá zombie (ruce se opřou o zeď).
+		var into: bool=probe[3]=="body"
+		if not into:
+			var shoulder: Vector3=(to_world*bone_pose(_ids[str(probe[3])+"Arm"])).origin
+			into=(p-shoulder).normalized().dot(-n)>0.55
+		if into:
+			body_hits.append([n,depth])
+			if probe[0]=="Head" and depth>(0.0 if head_hit.is_empty() else float(head_hit[2])): head_hit=[p,n,depth]
+		if probe[3]!="body" and depth>float(arm_hits.get(probe[3],[null,null,0.0])[2]):
+			arm_hits[probe[3]]=[p,n,depth]
+	# Posun, který vyhoví všem zdem najednou (kout, úzká chodba): uvolněné promítání.
+	# Protilehlé zdi se tak vyrovnají uprostřed místo přeskakování z jedné na druhou.
+	for it in 8:
+		for h in body_hits:
+			var viol: float=float(h[1])-push.dot(h[0])
+			if viol>0.0: push+=(h[0] as Vector3)*viol*(1.0 if it==0 else 0.5)
+	var moved:=Vector3.ZERO
+	if push.length_squared()>1e-6:
+		push=push.limit_length(0.3)
+		_sweep.shape=_capsule_low if low else _capsule
+		_sweep.transform=Transform3D(Basis.IDENTITY,c)
+		_sweep.motion=push
+		var allowed: float=space.cast_motion(_sweep)[0]
+		moved=push*allowed
+		global_position+=moved
+		_wall_n=push.normalized()
+		_wall_hold=0.25
+	# Tělo nemá kam couvnout (úzká chodba, kout): otočku z tohoto snímku zrušit, ať se zombie
+	# neotočí napříč přes zeď. Kdyby se zasekla, po 2 s se otočit nechá.
+	var left_max:=0.0
+	for h in body_hits: left_max=maxf(left_max,float(h[1])-moved.dot(h[0]))
+	if left_max>0.02 and absf(angle_difference(rotation.y,_yaw_prev))>0.0001 and _turn_stuck<2.0:
+		_turn_stuck+=get_physics_process_delta_time()
+		rotation.y=_yaw_prev
+		return
+	if left_max<=0.02: _turn_stuck=0.0
+	if not head_hit.is_empty():
+		var left: float=float(head_hit[2])-moved.dot(head_hit[1])
+		if left>0.01: _bend_away(_ids["Spine"],head_hit[0]+moved,head_hit[1],left,0.7)
+	for side in arm_hits:
+		var h: Array=arm_hits[side]
+		var left: float=float(h[2])-moved.dot(h[1])
+		if left>0.005: _bend_away(_ids[side+"Arm"],h[0]+moved,h[1],left,1.4)
+
+## Otočí kost tak, aby se bod `p` (svět) posunul o `depth` ve směru normály zdi.
+func _bend_away(bone: int, p: Vector3, n: Vector3, depth: float, max_angle: float) -> void:
+	if bone<0: return
+	var pivot: Vector3=(skeleton.global_transform*bone_pose(bone)).origin
+	var arm: Vector3=p-pivot
+	var length:=arm.length()
+	if length<0.08: return
+	var axis:=arm.cross(n)
+	if axis.length_squared()<1e-6: return
+	var angle:=minf(depth*1.1/length,max_angle)
+	_rotate_bone(bone,skeleton.global_basis.inverse()*axis.normalized(),angle)
+
+## Pojistka při přechodu do fyziky: těleso, které by začalo za zdí, se vrátí před ni
+## (jinak se zasekne ve zdi nebo ho fyzika vystřelí).
+func _pull_bodies_out_of_walls() -> void:
+	var space:=get_world_3d().direct_space_state
+	var c:=global_position+Vector3.UP*(0.42 if _is_low() else 0.95)
+	var q:=PhysicsRayQueryParameters3D.new()
+	q.collision_mask=1
+	for id in bodies:
+		var body: PhysicalBone3D=bodies[id]
+		var r:=float(body.get_meta("radius"))
+		var p:=body.global_position
+		var d:=p-c
+		var length:=d.length()
+		if length<0.05: continue
+		d/=length
+		q.from=c
+		q.to=p+d*r
+		var hit:=space.intersect_ray(q)
+		if hit.is_empty() or absf(hit.normal.y)>0.65: continue
+		body.global_position=hit.position-d*(r+0.02)
+
+## Mrtvé tělo ve vodě: vztlak a odpor. Pád do bazénu zbrzdí hladina, tělo se pomalu snese ke dnu.
+func _water_forces() -> void:
+	var wl:=_wl()
+	for id in bodies:
+		var body: PhysicalBone3D=bodies[id]
+		if body.collision_mask==0: continue
+		var r:=float(body.get_meta("radius"))
+		var sub:=clampf((wl-body.global_position.y+r)/(2.0*r),0.0,1.0)
+		if sub<=0.0: continue
+		var rid:=body.get_rid()
+		PhysicsServer3D.body_apply_central_force(rid,(Vector3.UP*9.8*WATER_LIFT-body.linear_velocity*WATER_DRAG)*body.mass*sub)
+		PhysicsServer3D.body_apply_torque(rid,-body.angular_velocity*float(_inertia[id])*WATER_DRAG*1.5*sub)
+
+## Zapečená mrtvola dostala ránu: znovu zapnout fyziku z její pózy.
+func _unfreeze() -> bool:
+	if not _frozen or _sinking or not is_inside_tree(): return false
+	_frozen=false
+	_resting=false
+	_rest_timer=0.0
+	_death_time=1.6                     # svaly už dávno povolily
+	_impact_count=maxi(_impact_count,4)
+	process_mode=Node.PROCESS_MODE_INHERIT
+	set_physics_process(true)
+	_gib.active=true
+	simulator.active=true
+	simulator.influence=1.0
+	simulator.physical_bones_start_simulation()
+	for id in bodies:
+		var body: PhysicalBone3D=bodies[id]
+		body.global_transform=(skeleton.global_transform*bone_pose(id)*body.body_offset).orthonormalized()
+		body.linear_velocity=Vector3.ZERO
+		body.angular_velocity=Vector3.ZERO
+		if _gone(id):
+			body.collision_layer=0
+			body.collision_mask=0
+		else:
+			body.collision_layer=32
+			body.collision_mask=1|32
+	return true
+
+## Výbuch: živé zabije a s každým tělem (i ležícím) mrští od středu podle vzdálenosti.
+func blast(center: Vector3, radius: float, speed: float) -> void:
+	if not dead and not _death_pending:
+		hit(_ids["Spine2"],global_position+Vector3.UP,(global_position-center).normalized(),2.8,99999.0)
+	elif _frozen and not _unfreeze():
+		return
+	_wake()
+	for id in bodies:
+		if _gone(id): continue
+		var body: PhysicalBone3D=bodies[id]
+		var at: Vector3=body.global_position if dead and not _death_pending else (skeleton.global_transform*bone_pose(id)*body.body_offset).origin
+		var away:=at-center
+		var fall:=clampf(1.0-away.length()/radius,0.15,1.0)
+		var dir:=(away.normalized()+Vector3.UP*0.7).normalized()
+		_pending_impacts.append([id,at,dir*speed*fall*body.mass])
