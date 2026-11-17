@@ -535,6 +535,10 @@ func pose(dt: float, swimming: bool) -> void:
 	_head_slow=head_raw if _head_slow==Vector3.ZERO else _head_slow.lerp(head_raw,1.0-exp(-1.6*dt))
 	var still:=steady*(1.0-steady_keep)
 	var head:=_head_smooth.lerp(_head_slow,still)
+	# Klidná hlava (míření) se nesmí od skutečné vzdálit víc než pár cm: jinak na zbraň
+	# po zastavení z běhu nedosáhnou ruce, korekce dosahu ji přitáhne k oku a kamera
+	# se pak dívá „skrz“ AK.
+	if still>0.0: head=head_raw+(head-head_raw).limit_length(lerpf(0.5,0.04,still))
 	head_offset=head-head_raw            # kamera bere stejnou (vyhlazenou) hlavu jako zbraň
 	# Setrvačnost zbraně: při otáčení pohledu se zpožďuje a naklání.
 	var yaw_now: float=avatar.rotation.y

@@ -447,6 +447,9 @@ func _process_timed(dt: float) -> void:
 	if third_person and control_enabled and not (crouching and _headroom < 1.2):
 		_update_shoulder_camera(dt, xf.origin)
 	camera.cull_mask = (0xFFFFF & ~8) if camera_uses_third_person else (0xFFFFF & ~4)
+	# Vlastní zbraň se při míření v pohybu přiblíží k oku i na ~1,5 cm; s rovinou ořezu 4 cm
+	# se pak zadní část zbraně ořízla a hráč viděl „skrz“ AK. V první osobě proto 5 mm.
+	camera.near = 0.04 if camera_uses_third_person else 0.005
 
 	var fov_target := (shoulder_fov if camera_uses_third_person else base_fov) + (5.0 if (_sprint and speed > WALK + 0.5 and grounded) else 0.0)
 	fov_target=lerpf(fov_target,50.0 if not camera_uses_third_person else 55.0,weapon.aim_amount)
