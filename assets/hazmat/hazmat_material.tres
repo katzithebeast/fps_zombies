@@ -1,10 +1,13 @@
-[gd_resource type="ShaderMaterial" format=3]
+[gd_resource type="ShaderMaterial" load_steps=9 format=3]
 
 [ext_resource type="Shader" path="res://shaders/hazmat.gdshader" id="1_27hm5"]
 [ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_albedo.png" id="2_mie3v"]
 [ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_grime.png" id="3_fv63n"]
 [ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_normal.png" id="4_7t5e6"]
 [ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_orm.png" id="5_077av"]
+[ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_wear.png" id="6_wear"]
+[ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_zones.png" id="7_zones"]
+[ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_detail_n.png" id="8_detail"]
 
 [resource]
 render_priority = 0
@@ -13,8 +16,6 @@ shader_parameter/albedo_tex = ExtResource("2_mie3v")
 shader_parameter/normal_tex = ExtResource("4_7t5e6")
 shader_parameter/orm_tex = ExtResource("5_077av")
 shader_parameter/grime_tex = ExtResource("3_fv63n")
-shader_parameter/tint = null
-shader_parameter/grime_color = null
-shader_parameter/grime = null
-shader_parameter/normal_strength = null
-shader_parameter/wet = null
+shader_parameter/wear_tex = ExtResource("6_wear")
+shader_parameter/zones_tex = ExtResource("7_zones")
+shader_parameter/detail_tex = ExtResource("8_detail")

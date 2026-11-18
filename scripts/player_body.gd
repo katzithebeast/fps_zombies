@@ -338,6 +338,18 @@ func update_body(dt: float, feet: Vector3, look_yaw: float, movement: Vector3, c
 	weapon.pose(dt,swimming)
 	weapon.pose_first_person()
 
+## Mokrý oblek: světová výška, kam sahala voda (oblek tam ztmavne a leskne se, pomalu schne).
+var _wet_line := -100.0
+func update_wetness(dt: float, water_y: float, feet_y: float) -> void:
+	if water_y > feet_y + 0.02:
+		_wet_line = maxf(_wet_line, water_y)
+	# schne zhruba 1 cm za 4 s (nahoře dřív než dole), pod hladinou zůstává mokrý
+	_wet_line = maxf(_wet_line - dt * 0.0025, water_y if water_y > feet_y else -100.0)
+	if _wet_line < feet_y - 0.05: _wet_line = -100.0
+	var full: MeshInstance3D = skeleton.get_node_or_null(BODY_NODE)
+	if full: full.set_instance_shader_parameter("wet_line", _wet_line)
+	if first_mesh: first_mesh.set_instance_shader_parameter("wet_line", _wet_line)
+
 func first_person_eye(look_yaw: float) -> Vector3:
 	var head_bone := skeleton.find_bone("mixamorig_Head")
 	var eye: Vector3 = first_mesh.global_transform * (weapon.bone_pose(head_bone).origin + weapon.head_offset)

@@ -363,6 +363,7 @@ func _process_timed(dt: float) -> void:
 	var speed := Vector2(velocity.x, velocity.z).length()
 	var grounded := is_on_floor() and not swimming
 	if body:
+		body.update_wetness(dt, water_y, xf.origin.y)
 		body.update_body(dt, xf.origin, yaw, velocity, crouching, swimming, control_enabled,
 			_sprint and absf(_input.x) > 0.1, third_person and not weapon.aiming, grounded)
 
