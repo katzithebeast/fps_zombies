@@ -18,16 +18,16 @@ func run() -> void:
 	var hz: PackedScene=load("res://assets/hazmat/hazmat_player.tscn")
 	var sl: AnimationLibrary=load("res://assets/scientist/locomotion.res")
 	var hl: AnimationLibrary=load("res://assets/hazmat/locomotion.res")
-	var set_:=[["",0.0],["idle",0.5],["fast_run",0.3],["crouch_walk",0.4]]
+	var set_:=[["",0.0],["idle",0.5],["fast_run",0.3],["slow_run",0.55]]
 	var shots:=[]
 	for i in set_.size():
 		rig(sci,sl,-3.6+i*2.4,set_[i][0],set_[i][1])
 		var h:=rig(hz,hl,-2.6+i*2.4,set_[i][0],set_[i][1])
 	var floor:=MeshInstance3D.new(); var pm:=PlaneMesh.new(); pm.size=Vector2(30,10); floor.mesh=pm; root.add_child(floor)
-	cam.position=Vector3(-2.4,1.05,2.6); cam.look_at(Vector3(-2.4,0.8,0))
+	cam.position=Vector3(0.0,1.05,4.6); cam.look_at(Vector3(0.0,0.8,0))
 	for k in 6: await RenderingServer.frame_post_draw
 	root.get_texture().get_image().save_png("/tmp/hz_front.png")
-	cam.position=Vector3(1.9,1.0,2.2); cam.look_at(Vector3(1.0,0.75,0))
+	cam.position=Vector3(-5.5,1.0,2.6); cam.look_at(Vector3(0.0,0.75,0))
 	for k in 4: await RenderingServer.frame_post_draw
 	root.get_texture().get_image().save_png("/tmp/hz_side.png")
 	quit()

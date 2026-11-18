@@ -36,5 +36,17 @@ func run() -> void:
 			cam.global_position=mt*Vector3(-1.3,1.9,1.6); cam.look_at(mt*Vector3(0,1.4,0.2))
 			await RenderingServer.frame_post_draw; await RenderingServer.frame_post_draw
 			root.get_texture().get_image().save_png("/tmp/hold_tp_%d.png"%k)
+			# detail rukou
+			var sk: Skeleton3D=rig.avatar.skeleton
+			var rh: Vector3=sk.global_transform*sk.get_bone_global_pose(sk.find_bone("mixamorig_RightHand")).origin
+			var lh: Vector3=sk.global_transform*sk.get_bone_global_pose(sk.find_bone("mixamorig_LeftHand")).origin
+			var mid:=(rh+lh)*0.5
+			cam.fov=35
+			cam.global_position=mid+mt.basis*Vector3(-0.55,0.25,0.45); cam.look_at(mid)
+			await RenderingServer.frame_post_draw; await RenderingServer.frame_post_draw
+			root.get_texture().get_image().save_png("/tmp/hold_hand_%d.png"%k)
+			cam.global_position=mid+mt.basis*Vector3(0.6,0.1,0.35); cam.look_at(mid)
+			await RenderingServer.frame_post_draw; await RenderingServer.frame_post_draw
+			root.get_texture().get_image().save_png("/tmp/hold_hand2_%d.png"%k)
 			k+=1
 	quit()

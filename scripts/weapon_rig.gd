@@ -604,6 +604,7 @@ func pose(dt: float, swimming: bool) -> void:
 	full.visible=weight>0.01 and holster<0.985
 	first.visible=weight>0.01 and holster<0.985
 	for flash in _flashes: flash.visible=_flash_time>0 and equipped and not swimming
+	_follow_extra_fingers(avatar.skeleton)
 	if weight<0.001: return
 	var sk: Skeleton3D=avatar.skeleton
 	# Držení musí mít vlastní pózu paží. Roll a posuny z běžeckého klipu by se
@@ -955,11 +956,35 @@ func pose(dt: float, swimming: bool) -> void:
 	_left_basis=left_basis
 	_right_basis=right_basis
 	_left_free=left_blend
-	# Rig má palec a ukazovák; zbývající prsty sdílejí váhy ruky.
-	for bone in [11,12,13,15,16,17,23,24,25,27,28,29]:
+	# Palec a ukazovák (indexy jako u scientisty); prostředníček, prsteníček a malíček mají
+	# vlastní kosti (41+) a obepnou rukojeť o něco víc.
+	for bone in [11,12,13,15,16,17,23,24,25,27,28,29]+_extra_fingers(sk):
 		var rest:=sk.get_bone_rest(bone).basis.get_rotation_quaternion()
-		var curl:=0.35 if "Thumb" in sk.get_bone_name(bone) else 0.75
+		var nm:=sk.get_bone_name(bone)
+		var curl:=0.35 if "Thumb" in nm else (0.75 if "Index" in nm else (0.95 if "Pinky" in nm else 0.85))
+		if not "Thumb" in nm: curl+=float(sk.get_meta("finger_curl_boost",0.0))
 		sk.set_bone_pose_rotation(bone,sk.get_bone_pose_rotation(bone).slerp(rest*Quaternion(Vector3.RIGHT,curl),weight))
+
+var _extra_cache: Array=[]
+var _extra_src: Array=[]
+func _extra_fingers(sk: Skeleton3D) -> Array:
+	if _extra_cache.is_empty() and sk.get_bone_count()>41:
+		for i in range(41,sk.get_bone_count()):
+			var nm:=sk.get_bone_name(i)
+			if "HandMiddle" in nm or "HandRing" in nm or "HandPinky" in nm:
+				_extra_cache.append(i)
+				var src:=nm.replace("Middle","Index").replace("Ring","Index").replace("Pinky","Index")
+				_extra_src.append(sk.find_bone(src))
+	return _extra_cache
+
+## Bez zbraně: další prsty kopírují pohyb ukazováku z animace (ruka nevypadá jako lopata).
+func _follow_extra_fingers(sk: Skeleton3D) -> void:
+	var extra:=_extra_fingers(sk)
+	for k in extra.size():
+		var src: int=_extra_src[k]
+		if src<0: continue
+		var delta:=sk.get_bone_rest(src).basis.get_rotation_quaternion().inverse()*sk.get_bone_pose_rotation(src)
+		sk.set_bone_pose_rotation(extra[k],sk.get_bone_rest(extra[k]).basis.get_rotation_quaternion()*delta)
 
 func pose_first_person() -> void:
 	if avatar.first_mesh.layers==0: return
@@ -1012,8 +1037,8 @@ func pose_first_person() -> void:
 			left_target+=delta
 	solve_arm(20,21,22,right_target,swing*Vector3(-0.7,head.y-0.5,-0.1),_right_basis)
 	solve_arm(8,9,10,left_target,swing*Vector3(0.6,head.y-0.5,0.15),_left_basis)
-	first_right_error=bone_pose(22).origin.distance_to(right_target)*0.86
-	first_left_error=bone_pose(10).origin.distance_to(left_target)*0.86
+	first_right_error=bone_pose(22).origin.distance_to(right_target-_right_basis.orthonormalized()*grip_offset(22))*0.86
+	first_left_error=bone_pose(10).origin.distance_to(left_target-_left_basis.orthonormalized()*grip_offset(10))*0.86
 	_pose_skeleton=null
 
 func pose_skeleton() -> Skeleton3D:
@@ -1045,8 +1070,17 @@ func aim_bone(bone: int, child: int, target: Vector3) -> void:
 	var before:=sk.get_bone_pose_rotation(bone)
 	sk.set_bone_pose_rotation(bone,before.slerp(local_basis.get_rotation_quaternion().normalized(),weight))
 
+## Úchopy jsou laděné na scientistu. Jiná postava (hazmat: kloub ruky v zápěstí, větší rukavice)
+## má střed dlaně jinde vůči kloubu ruky; o ten rozdíl (uložený v kostře) se posune cíl zápěstí,
+## aby rukojeť ležela v dlani.
+func grip_offset(hand: int) -> Vector3:
+	var sk: Skeleton3D=avatar.skeleton
+	var key:="grip_offset_Left" if hand==10 else "grip_offset_Right"
+	return sk.get_meta(key,Vector3.ZERO)
+
 func solve_arm(upper: int, lower: int, hand: int, target: Vector3, pole: Vector3, hand_basis: Basis) -> void:
 	var sk: Skeleton3D=pose_skeleton()
+	target-=hand_basis.orthonormalized()*grip_offset(hand)
 	var start:=bone_pose(upper).origin
 	var elbow:=bone_pose(lower).origin
 	var end:=bone_pose(hand).origin
