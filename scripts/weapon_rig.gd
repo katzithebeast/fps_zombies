@@ -27,6 +27,18 @@ const ITEM_POSES:={
 		"shell":Vector3.ZERO,"flash":0.0},
 }
 var inject:=0.0             # 0..1 průběh vpichu injekce (0 = jen drží)
+const HandGrip:=preload("res://scripts/hand_grip.gd")
+var grip_solver: RefCounted          # úchop zbraní: ruce na úchopových bodech, prsty na povrchu (hand_grip.gd)
+var _socket_mode:=false
+var _trigger_pull:=0.0               # stisk spouště při výstřelu (1 → 0)
+var _discipline:=0.0                 # 1 = ukazovák mimo spoušť podél pouzdra (přebíjení, sprint)
+var _rf_cache:={}                    # zbraň → {kost: rotace} pravé ruky (prsty, ukazovák na spoušti / podél pouzdra)
+var _lf_cache:={}                    # zbraň → {kost: rotace} levé ruky v úchopu
+var _left_support:={}                # zbraň → zápěstí levé ruky (souřadnice zbraně) vč. prstů pravé ruky
+var _lf_live:={}
+var _grip_debug:=OS.get_environment("GRIP_DEBUG")   # ladicí výpisy úchopů (tools/bake_grips.gd)
+var _lpush:=Vector3.ZERO               # vytlačení levé ruky ze zbraně (souřadnice zbraně)
+var _lf_tick:=0
 
 func _gi() -> Dictionary:
 	return ITEM_POSES[gun] if ITEM_POSES.has(gun) else GUNS[gun]
@@ -168,10 +180,22 @@ var _shell_mesh: CylinderMesh
 var _sounds: Dictionary={}
 
 func _ready() -> void:
+	grip_solver=HandGrip.new()
+	grip_solver.setup(avatar.skeleton)
 	full = make_gun(4)
 	first = make_gun(8)
 	avatar.model.add_child(full)
 	avatar.model.add_child(first)
+	# klidové polohy pohyblivých dílů (zásobník, sklopné hlavně) pro distanční pole úchopu
+	for key in GUNS:
+		var model: Node3D=full.get_node_or_null(key)
+		if model==null: continue
+		var rest:={}
+		for part in ["Magazine","Barrel"]:
+			var n: Node3D=model.get_node_or_null(part)
+			if n: rest[part.to_lower()]=n.transform
+		grip_solver.part_rest[key]=rest
+	if OS.get_environment("GRIP_BAKE")=="": _load_grips()
 	full.visible=false
 	first.visible=false
 	# Velmi slabé odražené světlo pouze pro vlastní ruce a zbraň.
@@ -391,6 +415,7 @@ func muzzle_global() -> Vector3:
 	return holder.global_transform*muzzle
 
 func kick() -> void:
+	_trigger_pull=1.0
 	if _pap.has(gun): _pap_surge=1.0
 	var r: Dictionary=RECOIL.get(gun,RECOIL.ak)
 	# Při míření drží zbraň pevněji u ramene: méně rotace, odskok jde víc dozadu do ramene.
@@ -904,6 +929,30 @@ func pose(dt: float, swimming: bool) -> void:
 	var right_basis:=gun_basis*Basis(Vector3.RIGHT,0.55)*Basis(Vector3.FORWARD,PI)
 	var left_basis:=gun_basis*Basis(Vector3.RIGHT,-PI/2)*Basis(Vector3.UP,PI/2)
 	left_basis=left_basis*Basis(Vector3.FORWARD,wrist_turn*left_blend)
+	# Úchopové body zbraně (AAA úchop): zápěstí spočítané z rozměrů ruky a tvaru zbraně.
+	_socket_mode=not ITEM_POSES.has(gun) and grip_solver.has(gun)
+	if _socket_mode:
+		var rw: Transform3D=grip_solver.wrist(gun,"Right")
+		right_target=full.transform*rw.origin
+		right_basis=gun_basis*rw.basis
+		var lw: Transform3D=_left_support.get(gun,grip_solver.wrist(gun,"Left"))
+		# levá ruka drží díl, který se hýbe (předpažbí na sklápěcích hlavních): jde s ním
+		var lpart: String=(grip_solver.SOCKETS[gun]["left"] as Dictionary).get("part","")
+		if lpart!="":
+			var pn:=_part(full,lpart.capitalize())
+			var pr: Transform3D=(grip_solver.part_rest.get(gun,{}) as Dictionary).get(lpart,Transform3D())
+			if pn: lw=pn.transform*pr.affine_inverse()*lw
+		var reload_basis:=left_basis
+		var reload_wrist:=full.transform*((_gi().left as Vector3).lerp(left_reload,left_blend))-reload_basis.orthonormalized()*_raw_grip_offset(10)
+		var support_basis:=gun_basis*lw.basis
+		# cesta mezi úchopem a zásobníkem / závěrem vede obloukem pod zbraní, ne skrz ni
+		var sg: Vector3=lw.origin
+		var rg: Vector3=full.transform.affine_inverse()*reload_wrist
+		var cg:=(sg+rg)*0.5
+		cg.y=minf(sg.y,rg.y)-0.075
+		var bt:=clampf(left_blend,0.0,1.0)
+		left_target=full.transform*(sg*(1.0-bt)*(1.0-bt)+cg*2.0*bt*(1.0-bt)+rg*bt*bt)
+		left_basis=Basis(support_basis.get_rotation_quaternion().slerp(reload_basis.get_rotation_quaternion(),left_blend))
 	if ITEM_POSES.has(gun):
 		left_target=item_left
 		left_basis=item_left_basis
@@ -948,7 +997,31 @@ func pose(dt: float, swimming: bool) -> void:
 	right_target+=_reach
 	left_target+=_reach
 	solve_arm(20,21,22,right_target,Vector3(-1.2,head.y-0.40,-0.3),right_basis)
+	if _socket_mode and left_blend>0.02:
+		left_target+=full.transform.basis*_lpush
 	solve_arm(8,9,10,left_target,Vector3(0.6,head.y-0.48,0.15),left_basis)
+	# díly zbraně tak, jak právě jsou (zásobník venku, hlavně sklopené)
+	var part_xf:={}
+	for part in ["Magazine","Barrel"]:
+		var n:=_part(full,part)
+		if n: part_xf[part.to_lower()]=n.transform
+	if _socket_mode and left_blend>0.02:
+		# Levá ruka při přebíjení / kontrole nesmí projít zbraní: vytlačit ven podél povrchu.
+		var to_gun:=full.transform.affine_inverse()
+		# Vytlačení si pamatuje (souřadnice zbraně) a jen pomalu povoluje: ruka se o zbraň opře,
+		# místo aby každý snímek skákala dovnitř a ven.
+		var pushed:=false
+		for it in 3:
+			var push: Vector3=grip_solver.push_out(gun,"Left",to_gun,part_xf)
+			if push.length()<0.0005: break
+			pushed=true
+			_lpush=(_lpush+push*1.1).limit_length(0.09)
+			# od skutečné polohy ruky (když cíl není na dosah, ruka je jinde než cíl)
+			left_target=bone_pose(10).origin+full.transform.basis*(push*1.15)
+			solve_arm(8,9,10,left_target,Vector3(0.6,head.y-0.48,0.15),left_basis)
+		if not pushed: _lpush*=exp(-dt*4.0)
+	else:
+		_lpush=Vector3.ZERO
 	right_error=bone_pose(22).origin.distance_to(right_target)*0.86
 	left_error=bone_pose(10).origin.distance_to(left_target)*0.86
 	_left_grip=left_target
@@ -956,6 +1029,10 @@ func pose(dt: float, swimming: bool) -> void:
 	_left_basis=left_basis
 	_right_basis=right_basis
 	_left_free=left_blend
+	_trigger_pull=move_toward(_trigger_pull,0.0,dt*9.0)
+	var disc_goal:=1.0 if (reloading or inspect>0.05 or run>0.35 or lower>0.2 or melee>0.0) else 0.0
+	_discipline=move_toward(_discipline,disc_goal,dt*(5.0 if disc_goal>_discipline else 3.5))
+	if _socket_mode and _fingers_on_gun(sk,dt,left_blend,part_xf): return
 	# Palec a ukazovák (indexy jako u scientisty); prostředníček, prsteníček a malíček mají
 	# vlastní kosti (41+) a obepnou rukojeť o něco víc.
 	for bone in [11,12,13,15,16,17,23,24,25,27,28,29]+_extra_fingers(sk):
@@ -964,6 +1041,132 @@ func pose(dt: float, swimming: bool) -> void:
 		var curl:=0.35 if "Thumb" in nm else (0.75 if "Index" in nm else (0.95 if "Pinky" in nm else 0.85))
 		if not "Thumb" in nm: curl+=float(sk.get_meta("finger_curl_boost",0.0))
 		sk.set_bone_pose_rotation(bone,sk.get_bone_pose_rotation(bone).slerp(rest*Quaternion(Vector3.RIGHT,curl),weight))
+
+## Úchopy upečené offline (tools/bake_grips.gd): poloha rukou na zbrani a ohyby prstů.
+## Bez nich se vše dopočítá za běhu při prvním klidném držení zbraně.
+const GRIPS_PATH:="res://assets/guns_sdf/grips.res"
+func _load_grips() -> void:
+	if not ResourceLoader.exists(GRIPS_PATH): return
+	var r: Resource=load(GRIPS_PATH)
+	if r==null or str(r.get_meta("sig",""))!=grip_solver.signature():
+		push_warning("úchopy zbraní: upečená data neodpovídají postavě, počítám za běhu")
+		return
+	var guns: Dictionary=r.get_meta("guns",{})
+	var by_name:=func(side: String, nm: String) -> Dictionary:
+		for ch in grip_solver.chains(side):
+			if ch.name==nm: return ch
+		return {}
+	for g in guns:
+		var d: Dictionary=guns[g]
+		grip_solver._wrist_cache[g+":Right"]=d.wR
+		grip_solver._wrist_cache[g+":Left"]=d.wL
+		_left_support[g]=d.support
+		var rc:={}
+		for nm in d.right:
+			if nm.begins_with("index_"): rc[nm]=d.right[nm]
+			else: rc[nm]=[by_name.call("Right",nm),d.right[nm]]
+		rc["index_ch"]=by_name.call("Right","Index")
+		_rf_cache[g]=rc
+		var lc:=[]
+		for nm in d.left: lc.append([by_name.call("Left",nm),d.left[nm]])
+		_lf_cache[g]=lc
+
+## Data pro tools/bake_grips.gd (jen pro zbraně, které už mají vše spočítané).
+func baked_grip(g: String) -> Dictionary:
+	if not (_rf_cache.has(g) and _lf_cache.has(g) and _left_support.has(g)): return {}
+	var right:={}
+	for k in _rf_cache[g]:
+		if k=="index_ch": continue
+		right[k]=_rf_cache[g][k] if k.begins_with("index_") else _rf_cache[g][k][1]
+	var left:={}
+	for e in _lf_cache[g]: left[e[0].name]=e[1]
+	return {"wR":grip_solver.wrist(g,"Right"),"wL":grip_solver.wrist(g,"Left"),"support":_left_support[g],"right":right,"left":left}
+
+## Prsty na zbrani: pravá ruka (rukojeť + ukazovák na spoušti / podél pouzdra) a levá (předpažbí,
+## při přebíjení zásobník). Výsledky v mezipaměti; počítají se, až ruce drží zbraň v klidu.
+func _fingers_on_gun(sk: Skeleton3D, dt: float, left_blend: float, part_xf: Dictionary) -> bool:
+	var to_gun:=full.transform.affine_inverse()
+	var steady_hold:=weight>0.99 and right_error<0.006 and reload_left<=0.0 and inspect<0.01 and holster<0.01 and _draw<0.01
+	if not _rf_cache.has(gun):
+		if not steady_hold: return false
+		var t0:=Time.get_ticks_usec()
+		var hand_xf:=bone_pose(22)
+		var res:={}
+		var tr: Vector3=grip_solver.SOCKETS[gun].trigger
+		for ch in grip_solver.chains("Right"):
+			if ch.name=="Index":
+				var on: Array=grip_solver.reach(gun,hand_xf,to_gun,ch,tr,part_xf)
+				var off: Array=grip_solver.along(gun,hand_xf,to_gun,ch,part_xf)
+				res["index_on"]=on
+				res["index_off"]=off
+				res["index_ch"]=ch
+				res["index_path"]=grip_solver.index_path(gun,hand_xf,to_gun,ch,part_xf,on,off)
+			else:
+				res[ch.name]=[ch,grip_solver.wrap(gun,hand_xf,to_gun,ch,part_xf)]
+		_rf_cache[gun]=res
+		if _grip_debug!="":
+			print("pravé prsty %s: %s" % [gun,res.keys().filter(func(k): return not k.begins_with("index")).map(func(k): return [k,(res[k][1] as Array).map(func(v): return snappedf(v,0.01))])])
+			print("  ukazovák na spoušti %s, mimo %s" % [res.index_on.map(func(v): return snappedf(float(v),0.01)),res.index_off.map(func(v): return snappedf(float(v),0.01))])
+		if _grip_debug!="":
+			print("úchop %s: prsty pravé ruky %.1f ms, ukazovák od spouště %.1f mm" % [gun,(Time.get_ticks_usec()-t0)/1000.0,float(res.index_on[4])*1000.0])
+	var rc: Dictionary=_rf_cache[gun]
+	var pull:=_trigger_pull*(1.0-_discipline)
+	for key in rc:
+		if key.begins_with("index_"): continue
+		var e: Array=rc[key]
+		_set_chain(sk,e[0],e[1],float(e[1][3]) if (e[1] as Array).size()>3 else 0.0,weight)
+	var a: Array=rc.index_on
+	var b: Array=rc.index_off
+	var mix: Array=grip_solver.index_blend(a,b,_discipline,int(rc.get("index_path",0)))
+	for j in 3: mix[j]=float(mix[j])+pull*[0.05,0.16,0.14][j]
+	_set_chain(sk,rc.index_ch,mix,float(mix[3]),weight)
+	# levá ruka: kapsle prstů pravé ruky jsou překážka (pistole oběma rukama)
+	if not _left_support.has(gun) and steady_hold:
+		_left_support[gun]=grip_solver.wrist(gun,"Left",grip_solver.capsules("Right",to_gun))
+	if left_blend<0.02:
+		if not _lf_cache.has(gun):
+			if not steady_hold or not _left_support.has(gun) or left_error>0.008: return true
+			var hand_xf:=bone_pose(10)
+			var caps: Array=grip_solver.capsules("Right",to_gun)
+			var res:=[]
+			for ch in grip_solver.chains("Left"): res.append([ch,grip_solver.wrap(gun,hand_xf,to_gun,ch,part_xf,caps)])
+			_lf_cache[gun]=res
+			if OS.is_debug_build() and _grip_debug!="":
+				print("levé prsty %s: %s" % [gun,res.map(func(e): return [e[0].name,(e[1] as Array).map(func(v): return snappedf(v,0.01))])])
+		for e in _lf_cache[gun]: _set_chain(sk,e[0],e[1],float(e[1][3]) if (e[1] as Array).size()>3 else 0.0,weight)
+	else:
+		# přebíjení: prsty se ovinou kolem toho, co ruka zrovna drží (zásobník, závěr, předpažbí)
+		_lf_tick+=1
+		if true:
+			var t_live:=Time.get_ticks_usec()
+			var hand_xf:=bone_pose(10)
+			var res:=[]
+			for ch in grip_solver.chains("Left"):
+				if ch.name=="Thumb":
+					# palec: jen doladit z minulé polohy (levné), aby neprošel zásobníkem
+					var prev: Array=[]
+					for e in (_lf_live.get("res",[]) if _lf_live.get("gun","")==gun else _lf_cache.get(gun,[])):
+						if e[0].name=="Thumb": prev=e[1]
+					res.append([ch,grip_solver.thumb(gun,hand_xf,to_gun,ch,part_xf,[],prev if prev.size()>=4 else [0.2,0.3,0.3,0.0])])
+					continue
+				# prst pokračuje z minulého snímku (časová soudržnost, pár vzorků)
+				var t0:=0.55
+				for e in (_lf_live.get("res",[]) if _lf_live.get("gun","")==gun else []):
+					if e[0].name==ch.name and (e[1] as Array).size()>4: t0=float(e[1][4])
+				res.append([ch,grip_solver.wrap_live(gun,hand_xf,to_gun,ch,part_xf,t0)])
+			_lf_live={"gun":gun,"res":res}
+			if _grip_debug=="time": print("živé prsty: %.2f ms" % ((Time.get_ticks_usec()-t_live)/1000.0))
+		if _lf_live.get("gun","")==gun:
+			for e in _lf_live.res: _set_chain(sk,e[0],e[1],float(e[1][3]) if (e[1] as Array).size()>3 else 0.0,weight)
+	return true
+
+func _set_chain(sk: Skeleton3D, ch: Dictionary, c: Array, side_angle: float, w: float) -> void:
+	for j in 3:
+		var bone: int=ch.bones[j]
+		var q:=(ch.rest[j] as Transform3D).basis.get_rotation_quaternion()
+		if j==0 and side_angle!=0.0: q=q*Quaternion(Vector3.BACK,side_angle)
+		q=q*Quaternion(Vector3.RIGHT,float(c[j]))
+		sk.set_bone_pose_rotation(bone,sk.get_bone_pose_rotation(bone).slerp(q,w))
 
 var _extra_cache: Array=[]
 var _extra_src: Array=[]
@@ -1074,6 +1277,10 @@ func aim_bone(bone: int, child: int, target: Vector3) -> void:
 ## má střed dlaně jinde vůči kloubu ruky; o ten rozdíl (uložený v kostře) se posune cíl zápěstí,
 ## aby rukojeť ležela v dlani.
 func grip_offset(hand: int) -> Vector3:
+	if _socket_mode: return Vector3.ZERO
+	return _raw_grip_offset(hand)
+
+func _raw_grip_offset(hand: int) -> Vector3:
 	var sk: Skeleton3D=avatar.skeleton
 	var key:="grip_offset_Left" if hand==10 else "grip_offset_Right"
 	return sk.get_meta(key,Vector3.ZERO)

@@ -378,6 +378,44 @@ func _initialize() -> void:
 	# posun středu dlaně proti scientistovi (v souřadnicích ruky) → cíl zápěstí v IK
 	for side in ["Left","Right"]:
 		sk.set_meta("grip_offset_" + side, grip_fit[side])
+	# střed povrchu dlaně (souřadnice kosti ruky) a tloušťka prstu: pro úchop zbraní (scripts/hand_grip.gd)
+	for side in ["Left","Right"]:
+		var hi: int = idx.call(side + "Hand")
+		var G := globals[hi]
+		var Gi := G.affine_inverse()
+		var ib := globals[idx.call(side + "HandIndex1")].basis.orthonormalized()
+		var n := (G.basis.orthonormalized().inverse() * ib.x.cross(ib.y)).normalized()
+		var pts := []
+		for vi in out_v.size():
+			var w := 0.0
+			for j in 8:
+				if out_b[vi*8+j] == hi: w += out_w[vi*8+j]
+			if w > 0.6: pts.append(Gi * out_v[vi])
+		var c := centroid(pts)
+		var dmax := 0.0
+		for v in pts: dmax = maxf(dmax, (v - c).dot(n))
+		var layer := []
+		for v in pts:
+			if (v - c).dot(n) > 0.6 * dmax: layer.append(v)
+		var palm := centroid(layer)
+		sk.set_meta("palm_point_" + side, palm)
+		print(side, " povrch dlaně ", palm, " (", layer.size(), " vrcholů)")
+	var m2: int = idx.call("RightHandMiddle2")
+	var m3: int = idx.call("RightHandMiddle3")
+	var dists := []
+	for vi in out_v.size():
+		var w := 0.0
+		for j in 8:
+			if out_b[vi*8+j] == m2: w += out_w[vi*8+j]
+		if w > 0.7:
+			var a2 := q[m2]
+			var ab := q[m3] - a2
+			var t := clampf((out_v[vi] - a2).dot(ab) / ab.length_squared(), 0.0, 1.0)
+			dists.append(out_v[vi].distance_to(a2 + ab * t))
+	dists.sort()
+	var fr: float = float(dists[dists.size() / 2]) * 0.86 if dists.size() > 0 else 0.0095
+	sk.set_meta("finger_radius", fr)
+	print("poloměr prstu ", fr * 1000.0, " mm")
 	var bend := func(a: Vector3, b: Vector3, c: Vector3) -> float: return (b - a).angle_to(c - b)
 	var sci_bend: float = bend.call(ss.get_bone_global_rest(idx.call("RightHandIndex1")).origin, ss.get_bone_global_rest(idx.call("RightHandIndex2")).origin, ss.get_bone_global_rest(idx.call("RightHandIndex3")).origin)
 	var hz_bend: float = bend.call(q[idx.call("RightHandIndex1")], q[idx.call("RightHandIndex2")], q[idx.call("RightHandIndex3")])

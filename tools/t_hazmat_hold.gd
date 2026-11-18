@@ -17,9 +17,9 @@ func run() -> void:
 	var w: Node=player.weapon
 	var rig: Node=player.body.weapon
 	var k:=0
-	for gun in ["ak","deagle"]:
+	for gun in (OS.get_environment("GUNS").split(",") if OS.get_environment("GUNS")!="" else PackedStringArray(["ak","mp40","deagle","izh54"])):
 		w.give(gun,false); w.switch_to(gun,true)
-		for aim in [0.0,1.0]:
+		for aim in ([0.0] if OS.get_environment("AIM")=="0" else [0.0,1.0]):
 			rig.aim=aim
 			for i in 60:
 				rig.aim=aim

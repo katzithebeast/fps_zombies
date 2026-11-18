@@ -421,6 +421,9 @@ bones/58/rotation = Quaternion(1.6766736e-08, -0.031970356, 5.3631205e-10, 0.999
 bones/58/scale = Vector3(0.9999998, 0.99999994, 0.9999999)
 metadata/grip_offset_Left = Vector3(0.041056238, 0.031861067, 0.0035900394)
 metadata/grip_offset_Right = Vector3(-0.04408989, 0.03713055, 0.0059445724)
+metadata/palm_point_Left = Vector3(0.026992973, 0.026013538, 0.022698058)
+metadata/palm_point_Right = Vector3(-0.032963216, 0.023364197, 0.025325404)
+metadata/finger_radius = 0.009546555653214455
 metadata/finger_curl_boost = 0.06156069
 
 [node name="Body" type="MeshInstance3D" parent="Skeleton3D" unique_id=787567856]
