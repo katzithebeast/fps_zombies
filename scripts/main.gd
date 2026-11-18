@@ -91,7 +91,7 @@ var settings := {
 	"player_name": "Hráč", "server_address": "", "server_port": 24567, "automatic_port": true,
 	# vzhled obleku (menu Customize)
 	"look_suit": Color(0.352, 0.552, 0.948), "look_rubber": Color(0.209, 0.209, 0.209), "look_visor": Color(0.863, 0.688, 0.19),
-	"look_pattern": 0, "look_pattern_color": Color(0.1, 0.12, 0.08), "look_pattern_scale": 1.0,
+	"look_pattern": 0, "look_pattern_color": Color(0.1, 0.12, 0.08), "look_pattern_scale": 1.0, "look_rubber_fx": 0,
 }
 var lamps: Array[Dictionary] = []
 var splashes: Array[GPUParticles3D] = []
@@ -273,7 +273,7 @@ func _save_settings() -> void:
 ## Vzhled obleku ze slovníku nastavení (pořadí jako PlayerBody.valid_look).
 func current_look() -> Array:
 	return [settings["look_suit"], settings["look_rubber"], settings["look_visor"], int(settings["look_pattern"]),
-		settings["look_pattern_color"], clampf(float(settings["look_pattern_scale"]), 0.2, 4.0)]
+		settings["look_pattern_color"], clampf(float(settings["look_pattern_scale"]), 0.2, 4.0), int(settings["look_rubber_fx"])]
 
 func _apply_look() -> void:
 	var look := current_look()

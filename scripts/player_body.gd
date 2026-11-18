@@ -338,12 +338,17 @@ func update_body(dt: float, feet: Vector3, look_yaw: float, movement: Vector3, c
 	weapon.pose(dt,swimming)
 	weapon.pose_first_person()
 
-## Vzhled obleku z menu Customize: [oblek, rukavice+boty+maska, hledí, vzor, barva vzoru, měřítko].
+## Vzhled obleku z menu Customize: [oblek, rukavice+boty+maska, hledí, vzor, barva vzoru, měřítko, efekt gumy].
+const FX_MAX := 19
 static func valid_look(look: Variant) -> bool:
-	if not look is Array or look.size() != 6: return false
+	if not look is Array or look.size() < 6 or look.size() > 7: return false
+	if look.size() == 7:
+		if not typeof(look[6]) in [TYPE_INT, TYPE_FLOAT]: return false
+		var fx := int(look[6])
+		if fx != 0 and (fx < 7 or fx > FX_MAX): return false
 	for i in [0, 1, 2, 4]:
 		if not look[i] is Color: return false
-	return typeof(look[3]) in [TYPE_INT, TYPE_FLOAT] and int(look[3]) >= 0 and int(look[3]) <= 12 \
+	return typeof(look[3]) in [TYPE_INT, TYPE_FLOAT] and int(look[3]) >= 0 and int(look[3]) <= FX_MAX \
 		and typeof(look[5]) in [TYPE_INT, TYPE_FLOAT] and is_finite(float(look[5])) and float(look[5]) >= 0.2 and float(look[5]) <= 4.0
 
 static func apply_look_to(mesh: GeometryInstance3D, look: Array) -> void:
@@ -354,6 +359,7 @@ static func apply_look_to(mesh: GeometryInstance3D, look: Array) -> void:
 	mesh.set_instance_shader_parameter("pattern", float(look[3]))
 	mesh.set_instance_shader_parameter("pattern_col", look[4])
 	mesh.set_instance_shader_parameter("pattern_scale", float(look[5]))
+	mesh.set_instance_shader_parameter("rubber_fx", float(look[6]) if look.size() > 6 else 0.0)
 
 func apply_look(look: Array) -> void:
 	apply_look_to(skeleton.get_node_or_null(BODY_NODE), look)

@@ -12,7 +12,9 @@ func run() -> void:
 	menu.open(false)
 	menu._show_customize(true)
 	var panel=menu._customize
-	panel._select("suit")
+	var part:=OS.get_environment("PART") if OS.get_environment("PART")!="" else "suit"
+	if OS.get_environment("RFX")!="": panel._set_look("look_rubber_fx",int(OS.get_environment("RFX")))
+	panel._select(part)
 	for i in 60: await process_frame
 	for pat in (OS.get_environment("PATS").split_floats(",") if OS.get_environment("PATS")!="" else [1,2,3,4,5,6,7,8,9,10,11,12]):
 		pat=int(pat)

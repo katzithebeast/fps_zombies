@@ -18,8 +18,10 @@ instance uniform vec4 rubber_col : source_color = vec4(0.209, 0.209, 0.209, 1.0)
 instance uniform vec4 visor_col : source_color = vec4(0.863, 0.688, 0.19, 1.0);
 instance uniform vec4 pattern_col : source_color = vec4(0.1, 0.12, 0.08, 1.0);
 instance uniform float pattern = 0.0;          // 0 nic, 1 maskáč, 2 digitál, 3 výstražné pruhy, 4 reflexní pásy, 5 cákance, 6 tygří pruhy
-                                               // prestižní: 7 zlato, 8 platina, 9 diamant, 10 obsidián, 11 krvavý měsíc, 12 láva
+                                               // prestižní: 7 zlato, 8 platina, 9 diamant, 10 obsidián, 11 krvavý měsíc, 12 láva,
+                                               // 13 galaxie, 14 elektro, 15 toxický, 16 hologram, 17 mráz, 18 duha, 19 éter
 instance uniform float pattern_scale = 1.0;
+instance uniform float rubber_fx = 0.0;        // prestižní efekt na rukavicích, botách a masce (0 nic, jinak id 7+)
 uniform vec4 tint : source_color = vec4(0.80, 0.85, 0.90, 1.0);
 uniform vec4 grime_color : source_color = vec4(0.24, 0.22, 0.17, 1.0);   // bazénové bahno, usazeniny
 uniform vec4 algae_color : source_color = vec4(0.22, 0.26, 0.17, 1.0);   // řasy u bot
@@ -124,13 +126,18 @@ void fragment() {
 	base = mix(base, base * 0.7, rubber);
 	// --- prestižní skiny (jen oblek): kovy, diamant, tři prestižní maskáče
 	int pk = int(pattern + 0.5);
-	float prest = pk >= 7 ? suit : 0.0;
+	int rk = int(rubber_fx + 0.5);
+	float ws = pk >= 7 ? suit : 0.0;
+	float wr = rk >= 7 ? rubber : 0.0;
+	float prest = ws + wr;
+	bool on_suit = ws >= wr;
+	int ek = on_suit ? pk : rk;
 	vec3 p_alb = vec3(0.0);
 	float p_metal = 0.0;
 	float p_rough = 0.3;
 	vec3 p_emit = vec3(0.0);
 	if (prest > 0.0) {
-		float shade = clamp(lum(texture(albedo_tex, UV).rgb) / lum(lin(SUIT_REF)), 0.4, 1.4);
+		float shade = clamp(lum(texture(albedo_tex, UV).rgb) / lum(lin(on_suit ? SUIT_REF : RUBBER_REF)), 0.4, 1.4);
 		float sc = max(pattern_scale, 0.2);
 		float t = TIME;
 		float facing = clamp(dot(normalize(VIEW), NORMAL), 0.0, 1.0);
@@ -138,25 +145,25 @@ void fragment() {
 		// světelný pruh, který každé ~3 s přejede oblek zdola nahoru
 		float sweep_y = fract(t * 0.3) * 3.2 - 0.6;
 		float sweep = exp(-pow((P.y * 0.9 + P.x * 0.35 - sweep_y) * 8.0, 2.0));
-		if (pk == 7) {            // zlato: tekuté zlato proudí po kartáčovaném kovu
+		if (ek == 7) {            // zlato: tekuté zlato proudí po kartáčovaném kovu
 			float f = fbm(warp(P * 2.6 * sc, t * 0.35));
 			p_alb = mix(vec3(0.72, 0.42, 0.1), vec3(1.0, 0.84, 0.46), smoothstep(0.3, 0.75, f));
 			p_metal = 1.0; p_rough = 0.08 + 0.14 * (1.0 - f) + brushed * 0.06;
 			p_emit = vec3(1.0, 0.72, 0.3) * (sweep * 1.1 + pow(f, 6.0) * 0.6);
-		} else if (pk == 8) {     // platina: chrom s duhovým olejovým filmem, který se přelévá
+		} else if (ek == 8) {     // platina: chrom s duhovým olejovým filmem, který se přelévá
 			float f = fbm(warp(P * 2.2 * sc, t * 0.3));
 			vec3 irid = 0.5 + 0.5 * cos(6.2832 * (f * 1.6 + facing * 0.7 + t * 0.12 + vec3(0.0, 0.33, 0.67)));
 			p_alb = mix(vec3(0.82, 0.83, 0.86), irid, 0.35 * smoothstep(0.35, 0.7, f));
 			p_metal = 1.0; p_rough = 0.05 + brushed * 0.06;
 			p_emit = vec3(0.9, 0.95, 1.0) * sweep * 1.5 + irid * pow(f, 4.0) * 0.35;
-		} else if (pk == 9) {     // diamant: broušené plošky, lom duhy se točí, jiskry
+		} else if (ek == 9) {     // diamant: broušené plošky, lom duhy se točí, jiskry
 			vec3 cell = floor(P * 24.0 * sc);
 			float hcell = hash3(cell);
 			vec3 prism = 0.6 + 0.4 * cos(6.2832 * (hcell + facing * 0.9 + t * 0.18 + vec3(0.0, 0.33, 0.67)));
 			p_alb = mix(vec3(0.93, 0.96, 1.0), prism, 0.55); p_metal = 0.85; p_rough = 0.025 + hcell * 0.03;
 			float tw = pow(max(sin(t * 2.6 + hcell * 43.0), 0.0), 40.0) * step(0.8, hash3(cell + 3.7));
 			p_emit = vec3(3.0) * tw + prism * sweep * 1.6;
-		} else if (pk == 10) {    // obsidián: černé sklo, fialová energie teče žilkami
+		} else if (ek == 10) {    // obsidián: černé sklo, fialová energie teče žilkami
 			vec3 q = warp(P * 4.0 * sc, t * 0.2);
 			float v = fbm(q);
 			p_alb = mix(vec3(0.012), vec3(0.05, 0.035, 0.08), smoothstep(0.4, 0.7, v)); p_metal = 0.4; p_rough = 0.05;
@@ -164,16 +171,72 @@ void fragment() {
 			float halo = 1.0 - smoothstep(0.0, 0.09, abs(v - 0.5));
 			float pulse = pow(0.5 + 0.5 * sin(P.y * 14.0 - t * 4.0 + v * 12.0), 3.0);
 			p_emit = vec3(0.55, 0.15, 1.0) * (vein * (0.5 + 2.2 * pulse) + halo * 0.25) + vec3(0.4, 0.2, 0.9) * sweep * 0.6;
-		} else if (pk == 11) {    // krvavý měsíc: maskáč se pomalu přelévá, okraje skvrn rudě žhnou
+		} else if (ek == 11) {    // krvavý měsíc: maskáč se pomalu přelévá, okraje skvrn rudě žhnou
 			float a = fbm(P * 3.2 * sc + vec3(0.0, 0.0, t * 0.12));
 			float b = fbm(P * 5.5 * sc + 11.0 - vec3(t * 0.09, 0.0, 0.0));
 			float camo = max(aas(a, 0.5, 0.004), aas(b, 0.58, 0.004) * 0.7);
 			p_alb = mix(vec3(0.42, 0.015, 0.02), vec3(0.05, 0.0, 0.005), camo); p_metal = 0.75;
-			vec3 fc = floor(P * 300.0);
-			p_rough = 0.2 + 0.15 * step(0.7, hash3(fc));
+			p_rough = 0.18 + 0.12 * fbm(P * 40.0);
 			float rim = (1.0 - aas(abs(a - 0.5), 0.012, 0.004)) + (1.0 - aas(abs(b - 0.58), 0.012, 0.004)) * 0.7;
-			float flake = step(0.985, hash3(fc + floor(t * 5.0 + hash3(fc) * 5.0)));
-			p_emit = vec3(1.6, 0.05, 0.03) * rim * (0.7 + 0.5 * sin(t * 2.5 + P.y * 6.0)) + vec3(2.0, 0.3, 0.25) * flake + vec3(1.0, 0.1, 0.08) * sweep * 0.35;
+			p_emit = vec3(1.6, 0.05, 0.03) * rim * (0.7 + 0.5 * sin(t * 2.5 + P.y * 6.0)) + vec3(1.0, 0.1, 0.08) * sweep * 0.35;
+		} else if (ek == 13) {    // galaxie: mlhovina proudí, hvězdy pomalu blikají
+			vec3 q = warp(P * 2.0 * sc, t * 0.12);
+			float n = fbm(q);
+			vec3 neb = mix(vec3(0.35, 0.06, 0.6), vec3(0.05, 0.4, 0.8), fbm(q * 1.7 + 3.0)) * smoothstep(0.42, 0.82, n);
+			vec3 sp = P * 12.0 * sc;
+			vec3 cell = floor(sp);
+			float hs = hash3(cell);
+			float d = length(fract(sp) - 0.5 - (vec3(hash3(cell + 1.3), hash3(cell + 2.7), hash3(cell + 4.1)) - 0.5) * 0.6);
+			float star = (1.0 - smoothstep(0.05, 0.13 + fwidth(d), d)) * step(0.72, hs);
+			float tw = 0.4 + 0.6 * pow(0.5 + 0.5 * sin(t * (1.5 + hs * 3.0) + hs * 40.0), 2.0);
+			p_alb = vec3(0.012, 0.008, 0.03) + neb * 0.15; p_metal = 0.3; p_rough = 0.12;
+			p_emit = neb * 1.05 + vec3(1.0, 0.95, 1.2) * star * tw * 5.0 + neb * sweep * 0.6;
+		} else if (ek == 14) {    // elektro: tmavá ocel, po obleku přeskakují modré výboje
+			float j1 = floor(t * 9.0);
+			float j2 = floor(t * 6.0 + 0.5);
+			float v1 = fbm(warp(P * 3.0 * sc, j1 * 0.37));
+			float v2 = fbm(warp(P * 2.2 * sc + 7.0, j2 * 0.53));
+			float arc = (1.0 - aas(abs(v1 - 0.5), 0.007, 0.003)) * step(0.25, hash3(vec3(j1, 1.0, 2.0)))
+				+ (1.0 - aas(abs(v2 - 0.5), 0.006, 0.003)) * step(0.4, hash3(vec3(j2, 5.0, 3.0)));
+			float halo = (1.0 - smoothstep(0.0, 0.05, abs(v1 - 0.5))) * 0.25;
+			p_alb = mix(vec3(0.04, 0.05, 0.07), vec3(0.09, 0.1, 0.13), vnoise(P * 9.0)); p_metal = 0.9; p_rough = 0.28;
+			p_emit = vec3(0.45, 0.75, 2.6) * arc + vec3(0.15, 0.3, 1.0) * halo + vec3(0.3, 0.5, 1.2) * sweep * 0.5;
+		} else if (ek == 15) {    // toxický: radioaktivní zelený sliz stéká po obleku
+			vec3 q = warp(P * 3.0 * sc + vec3(0.0, t * 0.3, 0.0), t * 0.2);
+			float v = fbm(q);
+			float slime = aas(v, 0.56, 0.01);
+			float glow = 0.5 + 0.5 * fbm(q * 3.0 - vec3(0.0, t, 0.0));
+			p_alb = mix(vec3(0.03, 0.045, 0.02), vec3(0.12, 0.4, 0.03), slime); p_metal = 0.0;
+			p_rough = mix(0.6, 0.06, slime);
+			p_emit = vec3(0.25, 0.9, 0.05) * slime * glow * glow + vec3(0.2, 0.9, 0.05) * (1.0 - smoothstep(0.0, 0.04, abs(v - 0.56))) * 0.35;
+		} else if (ek == 16) {    // hologram: azurová mřížka, světelné vlny, občas probliknutí
+			vec3 g = P * 9.0 * sc;
+			float dl = min(0.5 - abs(fract(g.y) - 0.5), 0.5 - abs(fract(g.x + g.z) - 0.5));
+			float grid = 1.0 - aas(dl, 0.035, 0.0);
+			float band = exp(-pow((fract(P.y * 0.5 - t * 0.35) - 0.5) * 9.0, 2.0));
+			float fres = pow(1.0 - facing, 2.0);
+			float glitch = 0.8 + 0.2 * step(0.12, hash3(vec3(floor(t * 12.0), 3.0, 7.0)));
+			p_alb = vec3(0.0, 0.03, 0.05); p_metal = 0.0; p_rough = 0.15;
+			p_emit = vec3(0.1, 0.85, 1.3) * (grid * 0.8 + fres * 0.55 + band * 0.6 + 0.02) * glitch;
+		} else if (ek == 17) {    // mráz: led s prasklinami, jinovatka pomalu narůstá a taje
+			float cover = aas(fbm(P * 3.0 * sc) + sin(t * 0.4) * 0.12, 0.56, 0.02);
+			float cr = 1.0 - aas(abs(fbm(P * 5.0 * sc + 4.0) - 0.5), 0.016, 0.005);
+			p_alb = mix(vec3(0.08, 0.3, 0.6), vec3(0.8, 0.9, 1.0), cover); p_metal = 0.15;
+			p_rough = mix(0.04, 0.55, cover);
+			p_emit = vec3(0.3, 0.8, 1.8) * cr * (0.7 + 0.5 * sin(t * 2.0 + P.y * 5.0)) + vec3(0.4, 0.8, 1.2) * sweep * 0.6;
+		} else if (ek == 18) {    // duha: duhové pásy se přelévají po kovu
+			float h = fbm(warp(P * 1.5 * sc, t * 0.25)) * 2.0 + P.y * 0.6 - t * 0.25;
+			vec3 rb = clamp(0.5 + 0.6 * cos(6.2832 * (h + vec3(0.0, 0.33, 0.67))), 0.0, 1.0);
+			p_alb = rb * rb * 0.9; p_metal = 0.9; p_rough = 0.14;
+			p_emit = rb * rb * (0.18 + sweep * 0.7);
+		} else if (ek == 19) {    // éter: vířící fialovo-oranžová energie (temný éter)
+			vec3 q = warp(P * 2.4 * sc, t * 0.45);
+			float v = fbm(q);
+			float w2 = fbm(q * 2.0 + vec3(t * 0.3));
+			vec3 ec = mix(vec3(0.4, 0.06, 0.8), vec3(1.0, 0.45, 0.05), smoothstep(0.4, 0.7, w2));
+			float inten = smoothstep(0.35, 0.75, v);
+			p_alb = mix(vec3(0.03, 0.01, 0.05), ec * 0.3, inten); p_metal = 0.5; p_rough = 0.2;
+			p_emit = ec * (inten * 1.15 + pow(1.0 - facing, 3.0) * 0.5);
 		} else {                  // láva: struska praská, magma proudí vzhůru a žhne
 			vec3 q = warp(P * 3.5 * sc - vec3(0.0, t * 0.25, 0.0), t * 0.15);
 			float v = fbm(q);

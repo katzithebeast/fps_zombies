@@ -25,7 +25,9 @@ const PALETTE := [Color(0.352, 0.552, 0.948), Color(0.9, 0.9, 0.87), Color(0.95,
 	Color(0.85, 0.35, 0.55), Color(0.5, 0.5, 0.52), Color(0.08, 0.08, 0.09), Color(0.863, 0.688, 0.19), Color(0.209, 0.209, 0.209)]
 const PATTERNS := [["Žádný", 0], ["Maskáč", 1], ["Digitál", 2], ["Výstražné pruhy", 3], ["Reflexní pásy", 4], ["Cákance", 5], ["Tygr", 6]]
 const PRESTIGE := [["Zlato", 7, Color(1.0, 0.78, 0.35)], ["Platina", 8, Color(0.85, 0.87, 0.9)], ["Diamant", 9, Color(0.7, 0.92, 1.0)],
-	["Obsidián", 10, Color(0.65, 0.35, 1.0)], ["Krvavý měsíc", 11, Color(0.95, 0.2, 0.2)], ["Láva", 12, Color(1.0, 0.5, 0.1)]]
+	["Obsidián", 10, Color(0.65, 0.35, 1.0)], ["Krvavý měsíc", 11, Color(0.95, 0.2, 0.2)], ["Láva", 12, Color(1.0, 0.5, 0.1)],
+	["Galaxie", 13, Color(0.55, 0.45, 1.0)], ["Elektro", 14, Color(0.45, 0.7, 1.0)], ["Toxický", 15, Color(0.45, 1.0, 0.2)],
+	["Hologram", 16, Color(0.3, 0.95, 1.0)], ["Mráz", 17, Color(0.75, 0.92, 1.0)], ["Duha", 18, Color(1.0, 0.55, 0.8)], ["Éter", 19, Color(0.85, 0.45, 1.0)]]
 
 var s: Dictionary
 var _viewport: SubViewport
@@ -35,6 +37,7 @@ var _skeleton: Skeleton3D
 var _body: GeometryInstance3D
 var _hud: Control
 var _editor: VBoxContainer
+var _scroll: ScrollContainer   # editor se posouvá kolečkem (hodně prestižních efektů)
 var _back: Button
 var _hover := ""
 var _selected := ""
@@ -84,12 +87,16 @@ func _ready() -> void:
 	hint.position = Vector2(142, 158)
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hint)
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	_scroll.modulate.a = 0.0
+	_scroll.visible = false
+	add_child(_scroll)
 	_editor = VBoxContainer.new()
-	_editor.add_theme_constant_override("separation", 12)
-	_editor.custom_minimum_size = Vector2(470, 0)
-	_editor.modulate.a = 0.0
-	_editor.visible = false
-	add_child(_editor)
+	_editor.add_theme_constant_override("separation", 10)
+	_editor.custom_minimum_size = Vector2(500, 0)
+	_scroll.add_child(_editor)
 	_back = _flat_button("‹  Zpět", 26)
 	_back.position = Vector2(132, 930)
 	_back.pressed.connect(func(): back())
@@ -106,7 +113,7 @@ func refresh() -> void:
 	if _selected != "": _build_editor(_selected)
 
 func look() -> Array:
-	return [s["look_suit"], s["look_rubber"], s["look_visor"], int(s["look_pattern"]), s["look_pattern_color"], float(s["look_pattern_scale"])]
+	return [s["look_suit"], s["look_rubber"], s["look_visor"], int(s["look_pattern"]), s["look_pattern_color"], float(s["look_pattern_scale"]), int(s.get("look_rubber_fx", 0))]
 
 func _update_look() -> void:
 	if _body: PlayerBodyScript.apply_look_to(_body, look())
@@ -233,14 +240,15 @@ func _select(k: String) -> void:
 	_turn_goal = {"": 0.35, "visor": 0.15, "suit": 0.1, "gloves": -0.35, "boots": 0.3}[k]
 	var tw := create_tween()
 	if k == "":
-		tw.tween_property(_editor, "modulate:a", 0.0, 0.18)
-		tw.tween_callback(func(): _editor.visible = false)
+		tw.tween_property(_scroll, "modulate:a", 0.0, 0.18)
+		tw.tween_callback(func(): _scroll.visible = false)
 	else:
 		_build_editor(k)
-		_editor.visible = true
-		_editor.modulate.a = 0.0
+		_scroll.visible = true
+		_scroll.scroll_vertical = 0
+		_scroll.modulate.a = 0.0
 		tw.tween_interval(0.25)
-		tw.tween_property(_editor, "modulate:a", 1.0, 0.35)
+		tw.tween_property(_scroll, "modulate:a", 1.0, 0.35)
 
 # --------------------------------------------------------------- editor
 func _flat_button(text: String, font := 20) -> Button:
@@ -346,6 +354,12 @@ func _build_editor(k: String) -> void:
 		_choice_row(_editor, PRESTIGE, pk, func(v: int):
 			_set_look("look_pattern", 0 if v == pk else v)
 			_build_editor("suit"), 2)
+	if k == "gloves" or k == "boots":
+		var rk := int(s.get("look_rubber_fx", 0))
+		_editor.add_child(_label("Prestižní efekt", 26, Color(1.0, 0.78, 0.35)))
+		_choice_row(_editor, PRESTIGE, rk, func(v: int):
+			_set_look("look_rubber_fx", 0 if v == rk else v)
+			_build_editor(k), 2)
 
 # --------------------------------------------------------------- vykreslení teček a čar
 func _draw_hud() -> void:
@@ -393,6 +407,7 @@ func _process(dt: float) -> void:
 	for k in PARTS:
 		_open[k] = move_toward(_open[k], 1.0 if k == _hover else 0.0, dt * 4.0)
 	# editor vedle postavy (vpravo), zpět dole vlevo
-	_editor.position = Vector2(size.x * 0.6, size.y * 0.2)
+	_scroll.position = Vector2(size.x * 0.6, size.y * 0.14)
+	_scroll.size = Vector2(minf(520.0, size.x * 0.38), size.y * 0.8)
 	_back.position = Vector2(132, size.y - 150)
 	_hud.queue_redraw()
