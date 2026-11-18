@@ -1,6 +1,6 @@
 extends SceneTree
 ## Kontrola průniků rukou do zbraní (distanční pole) v klidu, při přebíjení, kontrole zásobníku,
-## sprintu a úderu. Vypíše největší průnik (mm) pro každou ruku a stav. Spouštění headless.
+## sprintu a prohlídce (N). Vypíše největší průnik (mm) pro každou ruku a stav. Spouštění headless.
 var player: Player
 var rig: Node
 func _initialize() -> void: call_deferred("run")
@@ -72,6 +72,12 @@ func run() -> void:
 		for i in 50:
 			tick(1.0/60.0,0.0,minf(1.0,i/15.0)); acc.call("sprint")
 		for i in 30: tick(1.0/60.0,0.0,0.0)
+		w.test_examine=true
+		for i in 360:
+			tick(1.0/60.0); acc.call("prohlídka")
+		w.test_examine=false
+		for i in 60:
+			tick(1.0/60.0); acc.call("prohlídka")
 		var line:="%s:" % gun
 		for k in res:
 			var v: Array=res[k]

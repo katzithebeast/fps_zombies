@@ -2854,6 +2854,7 @@ func _network_state(sequence: int) -> Array:
 	if player.third_person and not player.weapon.aiming: flags |= NetScript.FLAG_ORBIT
 	if player.weapon.equipped: flags |= NetScript.FLAG_ARMED
 	if player.weapon.aiming: flags |= NetScript.FLAG_AIM
+	if player.weapon.examining: flags |= NetScript.FLAG_INSPECT
 	if player.is_on_floor() and not player.swimming: flags |= NetScript.FLAG_GROUNDED
 	return [sequence, player.global_position, player.velocity, wrapf(player.yaw, -PI, PI), player.pitch, flags, wrapf(player.body.body_yaw, -PI, PI), Time.get_ticks_msec()]
 
@@ -3097,7 +3098,7 @@ func _setup_ui() -> void:
 	var ui := CanvasLayer.new()
 	ui.layer = 20
 	add_child(ui)
-	_help = _label(ui, "WASD  pohyb        Shift  běh        Mezerník  skok\nC / Ctrl  přikrčit se a plazit\nP  první / třetí osoba        Q  změna ramene\nR  přebít AK / otočit neozbrojenou postavu\nE  sebrat AK        Levé tlačítko  střelba        Pravé  míření\nQ / kolečko myši  úder pažbou        Shift  sprint (sklopí zbraň)\nF  svítilna        V  VHS kamera        G  rybí oko        M / Tab  mapa (držet)\nI  inventář        1–5  rychlý panel (nastav v inventáři)   kolečko  další zbraň\nT  zahodit, co máš v ruce (v inventáři Shift + pravé tlačítko nebo přetáhnout mimo)\nZ  přivolat zombie na zkoušku        X  uklidit zombie\nEsc  menu a nastavení (záložka Testování)", 20, Color(1, 1, 1, 0.92))
+	_help = _label(ui, "WASD  pohyb        Shift  běh        Mezerník  skok\nC / Ctrl  přikrčit se a plazit\nP  první / třetí osoba        Q  změna ramene\nR  přebít AK / otočit neozbrojenou postavu        N (držet)  prohlédnout zbraň\nE  sebrat AK        Levé tlačítko  střelba        Pravé  míření\nQ / kolečko myši  úder pažbou        Shift  sprint (sklopí zbraň)\nF  svítilna        V  VHS kamera        G  rybí oko        M / Tab  mapa (držet)\nI  inventář        1–5  rychlý panel (nastav v inventáři)   kolečko  další zbraň\nT  zahodit, co máš v ruce (v inventáři Shift + pravé tlačítko nebo přetáhnout mimo)\nZ  přivolat zombie na zkoušku        X  uklidit zombie\nEsc  menu a nastavení (záložka Testování)", 20, Color(1, 1, 1, 0.92))
 	_help.position = Vector2(28, 22)
 	_fps = _label(ui, "", 18, Color(1, 1, 1, 0.7))
 	var perf: CanvasLayer = load("res://scripts/perf_monitor.gd").new()

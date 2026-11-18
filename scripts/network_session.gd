@@ -24,6 +24,7 @@ const FLAG_ORBIT := 8
 const FLAG_GROUNDED := 16
 const FLAG_ARMED := 32
 const FLAG_AIM := 64
+const FLAG_INSPECT := 128   # držené N: prohlídka zbraně
 var active := false
 var connecting := false
 var port := DEFAULT_PORT

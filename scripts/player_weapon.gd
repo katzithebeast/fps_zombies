@@ -33,6 +33,8 @@ var reserve:=RESERVE
 var infinite_reserve:=true      # mimo režim přežití se zásoba nepočítá
 var reload_left:=0.0
 var inspect:=0.0           # 0..1 kontrola zásobníku (držené R)
+var examining:=false       # držené N: prohlídka zbraně
+var test_examine:=false    # testy: prohlídka bez klávesy
 var _steady:=0.0
 var _was_floor:=true
 var _fall_vel:=0.0
@@ -491,8 +493,13 @@ func update(dt: float) -> void:
 		elif _r_held>0.28 and inspect>0.5: _click("ak_mag_in.wav",1.15)
 		_r_held=0.0
 	inspect=move_toward(inspect,1.0 if inspecting else 0.0,dt*(3.2 if inspecting else 4.5))
+	# N (držet): prohlídka zbraně – zvednout, otočit z obou stran (jako v Rustu / CoD).
+	# Míření, střelba, přebíjení i úder ji přeruší.
+	var lmb:=enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	var rmb:=enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	examining=enabled and Input.is_physical_key_pressed(KEY_N) and not lmb and not rmb and reload_left<=0 and melee_left<=0 and inspect<0.05 and sprint_amount<0.3
 	if _tag: _tag.queue_redraw()
-	var trigger:=enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and inspect<0.2
+	var trigger:=enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and inspect<0.2 and float(player.body.weapon._ex_w)<0.35
 	var sights:=(enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) or (test_aim and equipped)
 	var s: Dictionary=stats()
 	if reload_left>0:
@@ -534,6 +541,7 @@ func update(dt: float) -> void:
 	rig.sprint=sprint_amount
 	rig.melee=1.0-melee_left/MELEE if melee_left>0 else 0.0
 	rig.inspect=inspect
+	rig.examine_hold=examining or test_examine
 	rig.local_velocity=Basis(Vector3.UP,-player.yaw)*player.velocity
 	rig.step_phase=player._bob_phase
 	rig.crouch_now=player.crouching
@@ -550,7 +558,7 @@ func update(dt: float) -> void:
 	_fall_vel=player.velocity.y if not on_floor_now else 0.0
 	_was_floor=on_floor_now
 	# Klidná zbraň: při míření, drženém R a přebíjení se tlumí houpání zbraně i pohledu.
-	var steady_target:=maxf(aim_amount,maxf(inspect,1.0 if reload_left>0 else 0.0))
+	var steady_target:=maxf(maxf(aim_amount,float(rig._ex_w)*0.7),maxf(inspect,1.0 if reload_left>0 else 0.0))
 	_steady=move_toward(_steady,steady_target,dt*5.0)
 	rig.steady=_steady
 	rig.steady_keep=player.aim_sway

@@ -74,6 +74,7 @@ func _process(dt: float) -> void:
 	global_position = position_now
 	body.weapon.equipped=bool(flags & Net.FLAG_ARMED)
 	body.weapon.aim=lerpf(body.weapon.aim,1.0 if flags & Net.FLAG_AIM else 0.0,1.0-exp(-14.0*dt))
+	body.weapon.examine_hold=bool(flags & Net.FLAG_INSPECT)
 	body.weapon.pitch=lerpf(float(a[4]),float(b[4]),factor)
 	body.update_body(dt, position_now, look_yaw, velocity_now, bool(flags & Net.FLAG_CROUCH), bool(flags & Net.FLAG_SWIM), true, bool(flags & Net.FLAG_STRAFE), bool(flags & Net.FLAG_ORBIT), bool(flags & Net.FLAG_GROUNDED))
 	# Směr dodává vlastník postavy, i když právě orbituje kamerou nebo se otáčí na R.

@@ -32,8 +32,9 @@ func verify() -> void:
 	remote.set_process(false)
 	remote.push_state([1,Vector3.ZERO,Vector3.ZERO,0.0,0.2,16|32|64,0.0,0])
 	for frame in 60: remote._process(1.0/60)
-	check(remote.body.weapon.full.visible and remote.body.weapon.full.get_child(1).layers==16,"remote armed snapshot renders full weapon on multiplayer layer")
+	check(remote.body.weapon.full.visible and (remote.body.weapon.full.find_children("*","MeshInstance3D",true,false)[0] as MeshInstance3D).layers==16,"remote armed snapshot renders full weapon on multiplayer layer")
 	remote.play_action("shot",[Vector3.ZERO,Vector3.FORWARD])
+	for frame in 3: remote._process(1.0/60)     # zpětný ráz je pružina: projeví se až v dalším snímku
 	check(remote.body.weapon.recoil>0,"remote shot drives recoil")
 	remote.play_action("reload",[])
 	check(remote.body.weapon.reload_left>2,"remote reload drives hand and magazine animation")

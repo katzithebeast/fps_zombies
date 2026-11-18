@@ -74,6 +74,17 @@ var first_right_error:=0.0
 var first_left_error:=0.0
 var gun:="ak"
 var inspect:=0.0          # 0..1 kontrola zásobníku
+var examine_hold:=false   # držené N: prohlídka zbraně (jako v Rustu / CoD)
+var _ex_w:=0.0
+var _ex_t:=0.0
+var _ex_step:=0
+var _ex_pos:=Vector3.ZERO
+var _ex_pos_v:=Vector3.ZERO
+var _ex_rot:=Vector3.ZERO
+var _ex_rot_v:=Vector3.ZERO
+var _ex_off:=0.0
+var examine_override:=[]   # ladění: pevná póza prohlídky [posun, natočení]
+var _left_relax:=0.0        # levá ruka mimo zbraň: uvolněné prsty
 var steady:=0.0           # 0..1 míření / držené R / přebíjení
 var steady_keep:=0.1      # nastavení: kolik houpání při tom zůstane (0 = žádné)
 var _head_slow:=Vector3.ZERO
@@ -232,7 +243,7 @@ func _ready() -> void:
 	brass.metallic=1.0
 	brass.roughness=0.32
 	_shell_mesh.material=brass
-	_sounds={"out":_make_sound("ak_mag_out.wav",-6.0),"in":_make_sound("ak_mag_in.wav",-4.0),"bolt":_make_sound("ak_bolt.wav",-3.0)}
+	_sounds={"out":_make_sound("ak_mag_out.wav",-6.0),"in":_make_sound("ak_mag_in.wav",-4.0),"bolt":_make_sound("ak_bolt.wav",-3.0),"handle":_make_sound("gun_handle_1.wav",-13.0)}
 	set_gun("ak")
 
 func set_gun(name: String, draw: bool=true) -> void:
@@ -585,6 +596,93 @@ static func _key(phase: float, keys: Array) -> Variant:
 			return lerp(keys[i-1][1],keys[i][1],t)
 	return keys[keys.size()-1][1]
 
+# Prohlídka zbraně (držené N). Klíče [čas s, hodnota]: posun zbraně (jako r_move: x doprava,
+# y nahoru, z k tělu), natočení (x = sklon, záporný zvedá hlaveň; y = stočení; z = náklon bokem)
+# a u pistole kolik levá ruka pustí zbraň. Mezi časy "loop" se při dalším držení přehrává dokola,
+# "snd" = šustnutí rukavice / ťuknutí o zbraň.
+const EXAMINE:={
+	# puška: pravý bok (hlaveň vlevo) → levý bok (hlaveň vpravo) → pohled podél hlavně nahoru
+	"rifle":{"loop":[0.75,5.3],"snd":[0.3,1.75,3.55],
+		"move":[[0.0,Vector3.ZERO],[0.75,Vector3(-0.045,0.14,-0.08)],[1.5,Vector3(-0.05,0.148,-0.088)],
+			[2.15,Vector3(-0.08,0.165,-0.08)],[2.75,Vector3(-0.12,0.178,-0.09)],[3.4,Vector3(-0.13,0.184,-0.095)],
+			[4.0,Vector3(-0.05,0.13,-0.07)],[4.6,Vector3(-0.055,0.136,-0.075)],[5.3,Vector3(-0.045,0.14,-0.08)]],
+		"rot":[[0.0,Vector3.ZERO],[0.75,Vector3(0.12,1.0,0.35)],[1.5,Vector3(0.1,1.08,0.42)],
+			[2.15,Vector3(0.22,0.1,0.0)],[2.75,Vector3(0.1,-0.82,-0.3)],[3.4,Vector3(0.13,-0.9,-0.36)],
+			[4.0,Vector3(0.62,0.32,0.08)],[4.6,Vector3(0.7,0.38,0.14)],[5.3,Vector3(0.12,1.0,0.35)]],
+		"off":[[0.0,0.0]]},
+	# dlouhá dvojka: menší natočení, aby pažba nevjela do obličeje
+	"long":{"loop":[0.8,5.4],"snd":[0.32,1.8,3.6],
+		"move":[[0.0,Vector3.ZERO],[0.8,Vector3(-0.04,0.13,-0.05)],[1.55,Vector3(-0.045,0.136,-0.055)],
+			[2.2,Vector3(-0.07,0.15,-0.04)],[2.8,Vector3(-0.1,0.16,-0.03)],[3.45,Vector3(-0.105,0.165,-0.035)],
+			[4.05,Vector3(-0.05,0.12,-0.05)],[4.7,Vector3(-0.055,0.126,-0.055)],[5.4,Vector3(-0.04,0.13,-0.05)]],
+		"rot":[[0.0,Vector3.ZERO],[0.8,Vector3(0.1,0.85,0.3)],[1.55,Vector3(0.09,0.92,0.36)],
+			[2.2,Vector3(0.2,0.15,0.0)],[2.8,Vector3(0.1,-0.5,-0.25)],[3.45,Vector3(0.12,-0.56,-0.3)],
+			[4.05,Vector3(0.55,0.28,0.06)],[4.7,Vector3(0.62,0.33,0.12)],[5.4,Vector3(0.1,0.85,0.3)]],
+		"off":[[0.0,0.0]]},
+	# pistole: levá ruka pustí, pravý bok → náklon s horní stranou k oku → pohled na hlaveň nahoru
+	"pistol":{"loop":[0.7,4.9],"snd":[0.26,1.6,3.2],
+		"move":[[0.0,Vector3.ZERO],[0.7,Vector3(-0.065,0.125,-0.09)],[1.4,Vector3(-0.07,0.13,-0.095)],
+			[2.0,Vector3(-0.08,0.135,-0.09)],[2.6,Vector3(-0.09,0.14,-0.1)],[3.2,Vector3(-0.09,0.145,-0.105)],
+			[3.75,Vector3(-0.07,0.11,-0.07)],[4.3,Vector3(-0.075,0.116,-0.075)],[4.9,Vector3(-0.065,0.125,-0.09)]],
+		"rot":[[0.0,Vector3.ZERO],[0.7,Vector3(0.12,1.0,0.35)],[1.4,Vector3(0.14,1.06,0.4)],
+			[2.0,Vector3(0.3,0.6,0.9)],[2.6,Vector3(0.35,0.45,1.25)],[3.2,Vector3(0.38,0.4,1.32)],
+			[3.75,Vector3(0.65,0.3,0.1)],[4.3,Vector3(0.72,0.35,0.16)],[4.9,Vector3(0.12,1.0,0.35)]],
+		"off":[[0.0,0.0],[0.4,1.0]]},
+}
+
+## Prohlídka: [posun, natočení, váha, levá ruka pryč]. Váha i dráha jdou přes tlumenou pružinu,
+## takže zbraň má setrvačnost a při puštění N se měkce vrátí.
+func _examine(dt: float, reloading: bool) -> Array:
+	var want: bool=examine_hold and equipped and not reloading and inspect<0.05 and melee<=0.0 and not ITEM_POSES.has(gun) and GUNS.has(gun)
+	_ex_w=move_toward(_ex_w,1.0 if want else 0.0,dt*(2.4 if want else 3.0))
+	if _ex_w<=0.0 and not want and _ex_pos.length()<0.001 and _ex_rot.length()<0.002:
+		_ex_t=0.0
+		_ex_step=0
+		_ex_pos=Vector3.ZERO
+		_ex_pos_v=Vector3.ZERO
+		_ex_rot=Vector3.ZERO
+		_ex_rot_v=Vector3.ZERO
+		_ex_off=0.0
+		return [Vector3.ZERO,Vector3.ZERO,0.0,0.0]
+	var kind: String=_gi().reload
+	var track: Dictionary=EXAMINE["pistol" if kind=="pistol" else ("long" if kind=="break" else "rifle")]
+	var lp: Array=track.loop
+	if want:
+		_ex_t+=dt
+		var snd: Array=track.snd
+		if _ex_step<snd.size() and _ex_t>=float(snd[_ex_step]):
+			_ex_step+=1
+			_examine_sound()
+		if _ex_t>float(lp[1]):
+			_ex_t=float(lp[0])+fmod(_ex_t-float(lp[0]),float(lp[1])-float(lp[0]))
+			_ex_step=0
+			while _ex_step<snd.size() and float(snd[_ex_step])<_ex_t: _ex_step+=1
+	var w:=smoothstep(0.0,1.0,_ex_w)
+	var goal_p: Vector3=(_key(_ex_t,track.move) as Vector3)*w
+	var goal_r: Vector3=(_key(_ex_t,track.rot) as Vector3)*w
+	if examine_override.size()==2:     # ladění póz (tools/t_examine.gd)
+		goal_p=examine_override[0]*w
+		goal_r=examine_override[1]*w
+	var off: float=float(_key(_ex_t,track.off))*w
+	# pružina: zbraň dojíždí za klíči s váhou (malý překmit), dílčí kroky kvůli stabilitě
+	var sub:=maxi(1,ceili(dt/0.006))
+	var h:=dt/sub
+	for i in sub:
+		_ex_pos_v+=((goal_p-_ex_pos)*196.0-_ex_pos_v*2.0*0.72*14.0)*h
+		_ex_pos+=_ex_pos_v*h
+		_ex_rot_v+=((goal_r-_ex_rot)*169.0-_ex_rot_v*2.0*0.7*13.0)*h
+		_ex_rot+=_ex_rot_v*h
+	_ex_off=move_toward(_ex_off,off,dt*3.0)
+	return [_ex_pos,_ex_rot,w,smoothstep(0.0,1.0,_ex_off)]
+
+func _examine_sound() -> void:
+	var sound: AudioStreamPlayer3D=_sounds.get("handle")
+	if sound==null or not is_inside_tree(): return
+	var file:="res://audio/gun_handle_%d.wav"%(randi()%3+1)
+	if ResourceLoader.exists(file): sound.stream=load(file)
+	sound.pitch_scale=randf_range(0.92,1.08)*(1.12 if _gi().reload=="pistol" else 1.0)
+	sound.play()
+
 func pose(dt: float, swimming: bool) -> void:
 	_time+=dt
 	_springs(dt)
@@ -769,11 +867,20 @@ func pose(dt: float, swimming: bool) -> void:
 			mag_shift=Vector3(0,-0.07 if not pistol else -0.13,0)*k
 			left_blend=k
 			left_reload=(_gi().mag_hand as Vector3)+mag_shift
+	# Prohlídka zbraně (držené N): zvednout, ukázat jeden bok, přetočit na druhý, hlaveň nahoru.
+	var ex: Array=_examine(dt,reloading)
+	var ex_move: Vector3=ex[0]
+	var ex_rot: Vector3=ex[1]
+	var ex_w: float=ex[2]
+	var ex_off: float=ex[3]
+	r_move+=ex_move
+	r_pitch+=ex_rot.x
+	r_roll+=ex_rot.z
 	var speed_now:=minf(avatar.blend_speed,4.0)
 	# Sprint: zbraň šikmo přes tělo hlavní vzhůru, výraznější houpání. Úder pažbou: krátký výpad vpřed.
 	var run:=sprint*(1.0-aim)*(0.0 if reloading else 1.0)
 	var jab:=sin(clampf(melee/0.6,0.0,1.0)*PI) if melee>0.0 else 0.0
-	var calm:=1.0-maxf(inspect*0.85,still)        # při míření a drženém R se zbraň houpe jen tolik, kolik dovolí nastavení
+	var calm:=1.0-maxf(maxf(inspect*0.85,ex_w*0.8),still)        # při míření a drženém R se zbraň houpe jen tolik, kolik dovolí nastavení
 	# Houpání v rytmu kroků: osmička do stran, propad a kývnutí hlavně při došlapu.
 	# Jde ve stejném rytmu jako kamera, jen se o kousek opožďuje – zbraň má váhu.
 	var gait_goal:=clampf(speed_now/2.2,0.0,1.6)*(1.0-aim*0.85)*(1.0+run*0.9)*calm*k_sw
@@ -849,7 +956,7 @@ func pose(dt: float, swimming: bool) -> void:
 	# Těžká hlaveň: při rozjezdu do strany zaostává víc než ruce (vybočí), při brzdění se přehoupne.
 	var inertia_yaw:=-_inertia_offset.x*2.6*calm*(1.0-aim*0.85)
 	extra_roll+=0.22*obk+0.35*ob_more
-	var local:=Basis(Vector3.UP,_kick.y+inertia_yaw+0.12*obk-(0.55+0.35*ob_long)*ob_more+bob_yaw+_sway.x*1.2*calm+lerpf(HIP_YAW,0.0,aim)+SPRINT_YAW*run-0.3*jab)*Basis(Vector3.RIGHT,_kick.x+r_pitch-_sway.y*0.8*calm+SPRINT_PITCH*run+0.1*jab+extra_pitch)*Basis(Vector3.FORWARD,_kick.z-_sway.x*1.5*calm+r_roll+lerpf(HIP_ROLL,0.0,aim)+SPRINT_ROLL*run-0.5*jab+extra_roll)
+	var local:=Basis(Vector3.UP,ex_rot.y+_kick.y+inertia_yaw+0.12*obk-(0.55+0.35*ob_long)*ob_more+bob_yaw+_sway.x*1.2*calm+lerpf(HIP_YAW,0.0,aim)+SPRINT_YAW*run-0.3*jab)*Basis(Vector3.RIGHT,_kick.x+r_pitch-_sway.y*0.8*calm+SPRINT_PITCH*run+0.1*jab+extra_pitch)*Basis(Vector3.FORWARD,_kick.z-_sway.x*1.5*calm+r_roll+lerpf(HIP_ROLL,0.0,aim)+SPRINT_ROLL*run-0.5*jab+extra_roll)
 	# Model míří do +Z; záporný úhel kolem X zvedá hlaveň.
 	var gun_basis:=tilt*Basis(Vector3.UP,PI)*local
 	var position_now:=pivot+tilt*(offset-pivot)+tilt*Vector3(0,0,-recoil)
@@ -953,6 +1060,12 @@ func pose(dt: float, swimming: bool) -> void:
 		var bt:=clampf(left_blend,0.0,1.0)
 		left_target=full.transform*(sg*(1.0-bt)*(1.0-bt)+cg*2.0*bt*(1.0-bt)+rg*bt*bt)
 		left_basis=Basis(support_basis.get_rotation_quaternion().slerp(reload_basis.get_rotation_quaternion(),left_blend))
+		if ex_off>0.0:
+			# prohlídka pistole: levá ruka pustí a uvolněně klesne mimo záběr
+			var low:=head+Vector3(0.2,-0.6,0.14)
+			var mid:=left_target.lerp(low,0.5)+Vector3(0.06,-0.04,0.0)
+			var u:=ex_off
+			left_target=left_target*(1.0-u)*(1.0-u)+mid*2.0*u*(1.0-u)+low*u*u
 	if ITEM_POSES.has(gun):
 		left_target=item_left
 		left_basis=item_left_basis
@@ -1022,6 +1135,11 @@ func pose(dt: float, swimming: bool) -> void:
 		if not pushed: _lpush*=exp(-dt*4.0)
 	else:
 		_lpush=Vector3.ZERO
+	_left_relax=ex_off
+	if ex_off>0.0:
+		# volná ruka visí v prodloužení předloktí
+		var rest_q:=sk.get_bone_rest(10).basis.get_rotation_quaternion()
+		sk.set_bone_pose_rotation(10,sk.get_bone_pose_rotation(10).slerp(rest_q,ex_off*0.85))
 	right_error=bone_pose(22).origin.distance_to(right_target)*0.86
 	left_error=bone_pose(10).origin.distance_to(left_target)*0.86
 	_left_grip=left_target
@@ -1030,7 +1148,7 @@ func pose(dt: float, swimming: bool) -> void:
 	_right_basis=right_basis
 	_left_free=left_blend
 	_trigger_pull=move_toward(_trigger_pull,0.0,dt*9.0)
-	var disc_goal:=1.0 if (reloading or inspect>0.05 or run>0.35 or lower>0.2 or melee>0.0) else 0.0
+	var disc_goal:=1.0 if (reloading or inspect>0.05 or ex_w>0.05 or run>0.35 or lower>0.2 or melee>0.0) else 0.0
 	_discipline=move_toward(_discipline,disc_goal,dt*(5.0 if disc_goal>_discipline else 3.5))
 	if _socket_mode and _fingers_on_gun(sk,dt,left_blend,part_xf): return
 	# Palec a ukazovák (indexy jako u scientisty); prostředníček, prsteníček a malíček mají
@@ -1086,7 +1204,7 @@ func baked_grip(g: String) -> Dictionary:
 ## při přebíjení zásobník). Výsledky v mezipaměti; počítají se, až ruce drží zbraň v klidu.
 func _fingers_on_gun(sk: Skeleton3D, dt: float, left_blend: float, part_xf: Dictionary) -> bool:
 	var to_gun:=full.transform.affine_inverse()
-	var steady_hold:=weight>0.99 and right_error<0.006 and reload_left<=0.0 and inspect<0.01 and holster<0.01 and _draw<0.01
+	var steady_hold:=weight>0.99 and right_error<0.006 and reload_left<=0.0 and inspect<0.01 and _ex_w<=0.0 and holster<0.01 and _draw<0.01
 	if not _rf_cache.has(gun):
 		if not steady_hold: return false
 		var t0:=Time.get_ticks_usec()
@@ -1158,6 +1276,9 @@ func _fingers_on_gun(sk: Skeleton3D, dt: float, left_blend: float, part_xf: Dict
 			if _grip_debug=="time": print("živé prsty: %.2f ms" % ((Time.get_ticks_usec()-t_live)/1000.0))
 		if _lf_live.get("gun","")==gun:
 			for e in _lf_live.res: _set_chain(sk,e[0],e[1],float(e[1][3]) if (e[1] as Array).size()>3 else 0.0,weight)
+	if _left_relax>0.0:
+		for ch in grip_solver.chains("Left"):
+			_set_chain(sk,ch,[0.15,0.15,0.1] if ch.name=="Thumb" else [0.3,0.42,0.28],0.0,weight*_left_relax)
 	return true
 
 func _set_chain(sk: Skeleton3D, ch: Dictionary, c: Array, side_angle: float, w: float) -> void:
