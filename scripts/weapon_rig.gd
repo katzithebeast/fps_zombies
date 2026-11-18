@@ -110,6 +110,14 @@ var holster:=0.0             # 0 držení, 1 zbraň schovaná pod obrazem
 var muzzle:=Vector3(0,0.09,-0.66)
 var handle:=Vector3(0.045,0.075,-0.02)
 var hip_pose:=Vector3(-0.15,-0.235,0.30)
+var CLAV_L_TP:=Vector3(0,-0.04,0.13)      # levé rameno se k podpěře předsune
+var CLAV_L_FP:=Vector3(0.08,-0.04,0.20)
+var CLAV_R_TP:=Vector3(0.0,-0.08,-0.08)     # kam míří pravá klíční kost (3. osoba)
+var CLAV_R_FP:=Vector3(-0.15,-0.08,-0.06)  # totéž ve vlastním pohledu
+var ELBOW_AUTO:=1.0        # jak moc loket sleduje rovné zápěstí (0 = jen zadaný pól)
+var FOREARM_TWIST:=0.75    # podíl otočení dlaně, který nese předloktí místo zápěstí
+var UPPER_TWIST:=0.4       # u natažené paže nese část otočení i rameno
+var _hand_axis:={}           # kost ruky → směr ke kořeni prostředníčku v souřadnicích ruky (klid)
 const HIP_YAW:=0.0
 const HIP_ROLL:=0.0
 const SPRINT_MOVE:=Vector3(-0.04,-0.15,-0.04)
@@ -1071,8 +1079,8 @@ func pose(dt: float, swimming: bool) -> void:
 		left_basis=item_left_basis
 		left_blend=1.0
 	# Levé rameno se přirozeně předsune; dosah nesmí řešit natahování kostí.
-	aim_bone(7,8,bone_pose(7).origin+Vector3(0.13,0,0)+tilt*Vector3(0,-0.04,0.13))
-	aim_bone(19,20,bone_pose(19).origin+Vector3(-0.13,0,0)+tilt*Vector3(0,-0.04,0.10))
+	aim_bone(7,8,bone_pose(7).origin+Vector3(0.13,0,0)+tilt*CLAV_L_TP)
+	aim_bone(19,20,bone_pose(19).origin+Vector3(-0.13,0,0)+tilt*CLAV_R_TP)
 	# Při krajním pohledu dolů zbraň lehce přitáhnout do dosahu obou paží.
 	# Výpočet je na kopiích cílů; výsledný posun se přenese přes tlumenou pružinu,
 	# jinak by každé naklonění trupu v animaci (rozběh, zastavení) zbraní cuklo.
@@ -1335,8 +1343,8 @@ func pose_first_person() -> void:
 		var local_pose:=bone_pose(target.get_bone_parent(shoulder)).affine_inverse()*moved
 		target.set_bone_pose_position(shoulder,local_pose.origin)
 		target.set_bone_pose_rotation(shoulder,local_pose.basis.get_rotation_quaternion())
-	aim_bone(7,8,bone_pose(7).origin+lift*Vector3(0.08,-0.04,0.20))
-	aim_bone(19,20,bone_pose(19).origin+lift*Vector3(-0.10,-0.04,0.17))
+	aim_bone(7,8,bone_pose(7).origin+lift*CLAV_L_FP)
+	aim_bone(19,20,bone_pose(19).origin+lift*CLAV_R_FP)
 	var right_target:=_right_grip+correction
 	var left_target:=_left_grip+correction
 	# Vlastní kostra má posunutá ramena. Její dosah se musí vyřešit zvlášť:
@@ -1416,6 +1424,20 @@ func solve_arm(upper: int, lower: int, hand: int, target: Vector3, pole: Vector3
 	var b:=elbow.distance_to(end)
 	var distance_now:=clampf(start.distance_to(target),absf(a-b)+0.001,a+b-0.001)
 	var direction: Vector3=(target-start).normalized()
+	# Loket se natočí tak, aby předloktí šlo co nejvíc v prodloužení ruky (rovné zápěstí);
+	# zadaný pól jen přidává směr (loket dolů / ven) a hlídá, aby nešel nad rameno.
+	if not _hand_axis.has(hand):
+		var mid:=-1
+		for c in sk.get_bone_children(hand):
+			if "Middle" in sk.get_bone_name(c): mid=c
+		_hand_axis[hand]=sk.get_bone_rest(mid).origin.normalized() if mid>=0 else Vector3.UP
+	var hand_dir: Vector3=(hand_basis.orthonormalized()*(_hand_axis[hand] as Vector3)).normalized()
+	var straight: Vector3=target-hand_dir*b
+	straight.y=minf(straight.y,start.y+0.02)
+	# loket před hrudníkem smí, do hrudníku ne: čím víc ke středu těla, tím víc musí být vpředu
+	var inward:=clampf(1.0-absf(straight.x)/maxf(absf(start.x),0.01),0.0,1.0)
+	straight.z=maxf(straight.z,start.z+0.14*inward)
+	pole=pole.lerp(straight,ELBOW_AUTO if _socket_mode else 0.0)
 	var side: Vector3=(pole-start)-direction*(pole-start).dot(direction)
 	if side.length_squared()<0.0001:
 		# Cíl leží v ose pólu (ruka napříč těla): loket ohnout dolů.
@@ -1426,7 +1448,39 @@ func solve_arm(upper: int, lower: int, hand: int, target: Vector3, pole: Vector3
 	aim_bone(upper,lower,start+direction*along+side*bend)
 	aim_bone(lower,hand,target)
 	var local_basis: Basis=bone_pose(lower).basis.inverse()*hand_basis
+	# Otočení dlaně (pronace/supinace) nese předloktí, ne zápěstí: bez kostí pro zkrut by se
+	# celé otočení stočilo v zápěstí a rukáv by se tam „uškrtil“ (useknuté zápěstí).
+	var rest_q:=sk.get_bone_rest(hand).basis.get_rotation_quaternion()
+	var rel:=rest_q.inverse()*local_basis.get_rotation_quaternion().normalized()
+	var tw:=_twist_angle(rel,Vector3.UP)
+	if absf(tw)>0.001:
+		# U skoro natažené paže (podpěrná ruka) nese část otočení i rameno (rotace pažní kosti),
+		# u pokrčené by to vychýlilo loket do strany.
+		var e_now:=bone_pose(lower).origin
+		var bend_e:=(e_now-start).angle_to(bone_pose(hand).origin-e_now)
+		var straight_k:=1.0-clampf(bend_e/deg_to_rad(65.0),0.0,1.0)
+		var up_share:=UPPER_TWIST*straight_k
+		if up_share>0.01:
+			var uq:=sk.get_bone_pose_rotation(upper)
+			sk.set_bone_pose_rotation(upper,uq*Quaternion(Vector3.UP,tw*up_share*weight))
+			aim_bone(lower,hand,target)
+			local_basis=bone_pose(lower).basis.inverse()*hand_basis
+			rel=rest_q.inverse()*local_basis.get_rotation_quaternion().normalized()
+			tw=_twist_angle(rel,Vector3.UP)
+		var fq:=sk.get_bone_pose_rotation(lower)
+		sk.set_bone_pose_rotation(lower,fq*Quaternion(Vector3.UP,tw*FOREARM_TWIST*weight))
+		local_basis=bone_pose(lower).basis.inverse()*hand_basis
 	sk.set_bone_pose_rotation(hand,sk.get_bone_pose_rotation(hand).slerp(local_basis.get_rotation_quaternion().normalized(),weight))
+
+## Úhel natočení rotace q kolem osy (rozklad swing–twist), -PI..PI.
+static func _twist_angle(q: Quaternion, axis: Vector3) -> float:
+	var p:=Vector3(q.x,q.y,q.z).project(axis)
+	var t:=Quaternion(p.x,p.y,p.z,q.w)
+	if t.length_squared()<1e-9: return 0.0
+	t=t.normalized()
+	var ang:=2.0*atan2(Vector3(t.x,t.y,t.z).length(),t.w)
+	if Vector3(t.x,t.y,t.z).dot(axis)<0.0: ang=-ang
+	return wrapf(ang,-PI,PI)
 
 
 # --- Vylepšené zbraně (náš Pack-a-Punch): každý stupeň má vlastní barvu kamufláže a víc efektů,
