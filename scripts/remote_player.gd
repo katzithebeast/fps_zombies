@@ -12,7 +12,7 @@ func _ready() -> void:
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	body = BodyScript.new()
 	add_child(body)
-	body.skeleton.get_node("ScientistBody").layers = 16
+	body.skeleton.get_node(body.BODY_NODE).layers = 16
 	body.first_mesh.layers = 0
 	body.first_mesh.visible = false
 	body.weapon.set_remote_layers()

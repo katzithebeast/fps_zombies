@@ -607,11 +607,11 @@ func _build_preview() -> void:
 	rim.light_energy = 0.8
 	rim.light_color = Color(0.7, 0.8, 1.0)
 	w.add_child(rim)
-	_preview_model = (load("res://assets/scientist/ScientistRigged.fbx") as PackedScene).instantiate()
+	_preview_model = (load("res://assets/hazmat/hazmat_player.tscn") as PackedScene).instantiate()
 	w.add_child(_preview_model)
 	var ap := AnimationPlayer.new()
 	_preview_model.add_child(ap)
-	ap.add_animation_library("", load("res://assets/scientist/locomotion.res"))
+	ap.add_animation_library("", load("res://assets/hazmat/locomotion.res"))
 	var idle: Animation = ap.get_animation("idle")
 	if idle: idle.loop_mode = Animation.LOOP_LINEAR
 	ap.play("idle")

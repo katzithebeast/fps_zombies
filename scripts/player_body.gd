@@ -1,10 +1,12 @@
 extends Node3D
 signal action_started(kind: String, data: Array)
 ## Společně animované celé tělo; vlastní pohled vynechává pouze hlavu.
-const MODEL := preload("res://assets/scientist/ScientistRigged.fbx")
-const LIBRARY := preload("res://assets/scientist/locomotion.res")
-const FIRST_PERSON := preload("res://assets/scientist/closed_first_person_mesh.res")
-const FIRST_SKIN := preload("res://assets/scientist/first_person_skin.res")
+# Hazmat oblek (CGTrader, Royalty Free) převlečený na kostru scientisty: tools/build_hazmat.gd
+const MODEL := preload("res://assets/hazmat/hazmat_player.tscn")
+const LIBRARY := preload("res://assets/hazmat/locomotion.res")
+const FIRST_PERSON := preload("res://assets/hazmat/hazmat_first_person.res")
+const FIRST_SKIN := preload("res://assets/hazmat/hazmat_skin.res")
+const BODY_NODE := "Body"
 
 var skeleton: Skeleton3D
 var first_skeleton: Skeleton3D
@@ -37,15 +39,16 @@ var weapon: Node
 func _ready() -> void:
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	model = MODEL.instantiate()
-	model.name = "Scientist"
+	model.name = "Avatar"
 	model.scale = Vector3.ONE * 0.86
 	add_child(model)
 	skeleton = model.get_node("Skeleton3D")
-	var full: MeshInstance3D = skeleton.get_node("ScientistBody")
+	var full: MeshInstance3D = skeleton.get_node(BODY_NODE)
 	full.layers = 4
 	full.extra_cull_margin = 3.0
 	full.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	for surface in full.mesh.get_surface_count():
+		if not (full.get_active_material(surface) is StandardMaterial3D): continue
 		var original: StandardMaterial3D = full.get_active_material(surface)
 		var material := ShaderMaterial.new()
 		material.shader = preload("res://shaders/scientist.gdshader")
