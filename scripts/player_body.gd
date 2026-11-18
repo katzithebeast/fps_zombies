@@ -343,7 +343,7 @@ static func valid_look(look: Variant) -> bool:
 	if not look is Array or look.size() != 6: return false
 	for i in [0, 1, 2, 4]:
 		if not look[i] is Color: return false
-	return typeof(look[3]) in [TYPE_INT, TYPE_FLOAT] and int(look[3]) >= 0 and int(look[3]) <= 6 \
+	return typeof(look[3]) in [TYPE_INT, TYPE_FLOAT] and int(look[3]) >= 0 and int(look[3]) <= 12 \
 		and typeof(look[5]) in [TYPE_INT, TYPE_FLOAT] and is_finite(float(look[5])) and float(look[5]) >= 0.2 and float(look[5]) <= 4.0
 
 static func apply_look_to(mesh: GeometryInstance3D, look: Array) -> void:

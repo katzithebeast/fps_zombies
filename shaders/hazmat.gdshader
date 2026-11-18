@@ -19,6 +19,7 @@ instance uniform vec4 rubber_col : source_color = vec4(0.209, 0.209, 0.209, 1.0)
 instance uniform vec4 visor_col : source_color = vec4(0.863, 0.688, 0.19, 1.0);
 instance uniform vec4 pattern_col : source_color = vec4(0.1, 0.12, 0.08, 1.0);
 instance uniform float pattern = 0.0;          // 0 nic, 1 maskáč, 2 digitál, 3 výstražné pruhy, 4 reflexní pásy, 5 cákance, 6 tygří pruhy
+                                               // prestižní: 7 zlato, 8 platina, 9 diamant, 10 obsidián, 11 krvavý měsíc, 12 láva
 instance uniform float pattern_scale = 1.0;
 uniform vec4 tint : source_color = vec4(0.80, 0.85, 0.90, 1.0);
 uniform vec4 grime_color : source_color = vec4(0.24, 0.22, 0.17, 1.0);   // bazénové bahno, usazeniny
@@ -117,6 +118,46 @@ void fragment() {
 	base = mix(base, suit_shade, suit);
 	base = mix(base, base * vec3(0.55, 0.5, 0.42), visor);   // hledí: tmavé zlacené zrcadlo
 	base = mix(base, base * 0.7, rubber);
+	// --- prestižní skiny (jen oblek): kovy, diamant, tři prestižní maskáče
+	int pk = int(pattern + 0.5);
+	float prest = pk >= 7 ? suit : 0.0;
+	vec3 p_alb = vec3(0.0);
+	float p_metal = 0.0;
+	float p_rough = 0.3;
+	vec3 p_emit = vec3(0.0);
+	if (prest > 0.0) {
+		float shade = clamp(lum(texture(albedo_tex, UV).rgb) / lum(lin(SUIT_REF)), 0.4, 1.4);
+		float sc = max(pattern_scale, 0.2);
+		float brushed = vnoise(P * vec3(5.0, 140.0, 5.0));
+		float camo = smoothstep(0.5, 0.53, fbm(P * 3.2 * sc));
+		float camo2 = smoothstep(0.58, 0.61, fbm(P * 5.5 * sc + 11.0));
+		if (pk == 7) {            // zlato: kartáčovaný kov
+			p_alb = vec3(1.0, 0.71, 0.29); p_metal = 1.0; p_rough = 0.14 + brushed * 0.12;
+		} else if (pk == 8) {     // platina
+			p_alb = vec3(0.8, 0.8, 0.82); p_metal = 1.0; p_rough = 0.08 + brushed * 0.1;
+		} else if (pk == 9) {     // diamant: broušené plošky, duhový lom, jiskry
+			vec3 cell = floor(P * 24.0 * sc);
+			float hcell = hash3(cell);
+			float facing = dot(normalize(VIEW), NORMAL);
+			vec3 prism = 0.6 + 0.4 * cos(6.2832 * (hcell + facing * 0.9 + vec3(0.0, 0.33, 0.67)));
+			p_alb = mix(vec3(0.93, 0.96, 1.0), prism, 0.5); p_metal = 0.85; p_rough = 0.025 + hcell * 0.03;
+			p_emit = vec3(2.5) * step(0.992, hash3(cell + floor(TIME * 4.0)));
+		} else if (pk == 10) {    // obsidián: černé sklo, fialové žilky pulzují
+			p_alb = mix(vec3(0.015), vec3(0.05, 0.04, 0.07), max(camo, camo2)); p_metal = 0.4; p_rough = 0.06;
+			float vein = 1.0 - smoothstep(0.0, 0.018, abs(fbm(P * 5.0 * sc + 3.0) - 0.5));
+			p_emit = vec3(0.55, 0.15, 1.0) * vein * (1.2 + 0.8 * sin(TIME * 2.0 + P.y * 9.0));
+		} else if (pk == 11) {    // krvavý měsíc: rudá metalíza s maskáčem a třpytem
+			p_alb = mix(vec3(0.42, 0.015, 0.02), vec3(0.05, 0.0, 0.005), max(camo, camo2 * 0.7)); p_metal = 0.75;
+			p_rough = 0.2 + 0.15 * step(0.7, hash3(floor(P * 300.0)));
+		} else {                  // láva: tmavá struska, žhavé praskliny
+			p_alb = mix(vec3(0.05, 0.04, 0.035), vec3(0.13, 0.08, 0.06), camo); p_metal = 0.0; p_rough = 0.75;
+			float crack = 1.0 - smoothstep(0.0, 0.025, abs(fbm(P * 4.0 * sc + 9.0) - 0.5));
+			p_emit = vec3(3.0, 0.75, 0.08) * crack * (0.75 + 0.25 * sin(TIME * 1.7 + P.x * 7.0 + P.y * 5.0));
+			p_alb = mix(p_alb, vec3(0.6, 0.12, 0.02), crack * 0.6);
+		}
+		p_alb *= mix(1.0, shade, 0.5);
+		base = mix(base, p_alb, prest);
+	}
 	// --- špína: z upečené masky + jemný rozptyl, guma a hledí méně
 	float dirt = clamp(w.r * (0.75 + 0.5 * g.g) - 0.05, 0.0, 1.0) * grime * (1.0 - visor * 0.85);
 	float low = 1.0 - smoothstep(0.0, 0.75, world_pos.y - NODE_POSITION_WORLD.y);
@@ -146,14 +187,16 @@ void fragment() {
 	float rough = rough_suit * suit + rough_rubber * rubber + rough_visor * visor + orm.g * other;
 	rough = mix(rough, 0.45, bl * 0.4);
 	rough = mix(rough, 0.07, soak * (1.0 - visor));
+	rough = mix(rough, p_rough + dirt * 0.3, prest);
 	ALBEDO = col;
+	EMISSION = p_emit * prest * (1.0 - dirt * 0.8) * (1.0 - soak * 0.3);
 	ROUGHNESS = clamp(rough, 0.02, 1.0);
-	METALLIC = max(orm.b * other, visor * 0.95);
+	METALLIC = max(max(orm.b * other, visor * 0.95), p_metal * prest * (1.0 - dirt * 0.7));
 	SPECULAR = 0.5;
 	AO = orm.r;
 	AO_LIGHT_AFFECT = 0.55;
 	// lakovaná vrstva PVC: ostrý odlesk navrch, slábne pod špínou; mokrý oblek se leskne celý
-	CLEARCOAT = clamp(suit * (0.28 - dirt * 0.25) + soak * 0.9 + rubber * 0.08, 0.0, 1.0);
+	CLEARCOAT = clamp(suit * (0.28 - dirt * 0.25) + soak * 0.9 + rubber * 0.08 + prest * 0.4, 0.0, 1.0);
 	CLEARCOAT_ROUGHNESS = mix(0.3, 0.05, soak);
 	// měkký lesk na hranách záhybů (látka), na gumě slabší
 	RIM = 0.18 * suit + 0.08 * rubber;

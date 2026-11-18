@@ -43,7 +43,7 @@ var _intro: Tween
 var _footer: Label
 var _tabs: TabContainer
 const CustomizeScript := preload("res://scripts/customize_panel.gd")
-var _customize: PanelContainer
+var _customize: Control
 
 func add_tab(title: String) -> VBoxContainer:
 	# Další záložka nastavení zvenku (testování).
@@ -101,8 +101,6 @@ func _ready() -> void:
 	_root.add_child(_footer)
 	_build_multiplayer()
 	_customize = CustomizeScript.new(s)
-	_customize.position = Vector2(150, 110)
-	_customize.custom_minimum_size = Vector2(1060, 820)
 	_customize.visible = false
 	_customize.changed.connect(func(key: String, value: Variant): _change(key, value))
 	_customize.closed.connect(func(): _show_customize(false))
@@ -462,7 +460,9 @@ func _show_customize(v: bool) -> void:
 	_settings_box.visible = false
 	_multiplayer_box.visible = false
 	_main_box.visible = not v
-	if v: _customize.refresh()
+	if v:
+		if _customize._selected != "": _customize._select("")
+		_customize.refresh()
 
 func open(game_running: bool) -> void:
 	in_game = game_running
@@ -488,7 +488,7 @@ func back() -> void:
 	if _settings_box.visible:
 		_show_settings(false)
 	elif _customize.visible:
-		_show_customize(false)
+		_customize.back()
 	elif _multiplayer_box.visible:
 		_show_multiplayer(false)
 	elif in_game:
