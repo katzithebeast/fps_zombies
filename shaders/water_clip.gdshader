@@ -34,7 +34,9 @@ void vertex() {
 }
 
 void fragment() {
-	if (CAMERA_POSITION_WORLD.y < water_level && wpos.y < water_level - 0.004) discard;
+	// Jen kamery, které nevidí vodu (vrstva 2): zrcadlová kamera odrazu a sondy. Hráč ve vypuštěném
+	// bazénu (kamera pod y=0) dřív nechal zmizet vše pod hladinou.
+	if ((CAMERA_VISIBLE_LAYERS & 2u) == 0u && CAMERA_POSITION_WORLD.y < water_level && wpos.y < water_level - 0.004) discard;
 	vec4 alb = albedo_color;
 	if (use_albedo_tex) alb *= texture(albedo_tex, UV);
 	if (use_vertex_color) alb *= COLOR;

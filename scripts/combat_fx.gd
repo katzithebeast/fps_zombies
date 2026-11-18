@@ -31,6 +31,13 @@ var _hole_texture: ImageTexture
 const HOLE_MAX:=48
 
 var _dot_texture: GradientTexture2D
+# Zásah do zdi: jiskry, keramický prach, střepy glazury (odskočí od podlahy), oblak prachu, záblesk.
+const IMPACT_POOL:=8
+var _imp: Array=[]
+var _imp_next:=0
+var _imp_lights: Array=[]
+var _imp_light_next:=0
+var _hole_set: Array=[]           # [albedo, normála, ORM] pro každou variantu díry
 
 func _dot() -> GradientTexture2D:
 	# Měkká kulatá tečka: částice nevypadají jako čtverečky.
@@ -187,6 +194,20 @@ func _ready() -> void:
 			image.set_pixel(x,y,Color(0.05+0.25*(1.0-core),0.05+0.24*(1.0-core),0.05+0.22*(1.0-core),maxf(core,rim)))
 	image.generate_mipmaps()
 	_hole_texture=ImageTexture.create_from_image(image)
+	for v in [1,2,3]:
+		_hole_set.append([load("res://assets/fx/bullet_hole_%d.png"%v),load("res://assets/fx/bullet_hole_%d_n.png"%v),load("res://assets/fx/bullet_hole_%d_orm.png"%v)])
+	for i in IMPACT_POOL: _imp.append(_make_impact())
+	for i in 3:
+		var light:=OmniLight3D.new()
+		light.light_color=Color(1.0,0.72,0.4)
+		light.light_energy=0.0
+		light.omni_range=1.3
+		light.omni_attenuation=2.0
+		light.shadow_enabled=false
+		light.light_specular=0.6
+		light.visible=false
+		add_child(light)
+		_imp_lights.append(light)
 
 func _process(dt: float) -> void:
 	var _perf_t0:=Time.get_ticks_usec()
@@ -230,6 +251,10 @@ func prewarm(point: Vector3) -> void:
 	for tracer in _tracers:
 		tracer.global_position=point
 		tracer.visible=true
+	for slot in _imp:
+		for key in ["sparks","powder","chips","dust","linger","bubbles"]:
+			slot[key].global_position=point
+			slot[key].restart()
 	await get_tree().create_timer(0.4).timeout
 	for emitter in _spurt_pool: emitter.emitting=false
 	for tracer in _tracers: tracer.visible=false
@@ -259,8 +284,6 @@ func hole(point: Vector3, normal: Vector3) -> void:
 	if _holes.size()<HOLE_MAX:
 		decal=Decal.new()
 		decal.cull_mask=1
-		decal.texture_albedo=_hole_texture
-		decal.size=Vector3(0.075,0.12,0.075)
 		decal.normal_fade=0.55
 		decal.distance_fade_enabled=true
 		decal.distance_fade_begin=18.0
@@ -270,6 +293,12 @@ func hole(point: Vector3, normal: Vector3) -> void:
 	else:
 		decal=_holes[_hole_next]
 		_hole_next=(_hole_next+1)%HOLE_MAX
+	var set: Array=_hole_set[randi()%_hole_set.size()]
+	decal.texture_albedo=set[0]
+	decal.texture_normal=set[1]
+	decal.texture_orm=set[2]
+	var sz:=randf_range(0.09,0.13)
+	decal.size=Vector3(sz,0.12,sz)
 	var up:=normal.normalized()
 	var side:=up.cross(Vector3.UP if absf(up.y)<0.9 else Vector3.RIGHT).normalized()
 	decal.global_transform=Transform3D(Basis(side,up,side.cross(up)).rotated(up,randf()*TAU),point+up*0.01)
@@ -423,7 +452,7 @@ func pool(victim: Node3D) -> void:
 	tw.tween_property(decal,"size",Vector3(final,0.22,final),14.0).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_SINE)
 	decal.set_meta("tween",tw)
 
-func shot(origin: Vector3, hit: Vector3, solid: bool) -> bool:
+func shot(origin: Vector3, hit: Vector3, solid: bool, normal:=Vector3.ZERO, kind:="tile") -> bool:
 	# Svítící stopa střely od ústí hlavně; vrací, zda vznikl prach z dopadu.
 	var length:=origin.distance_to(hit)
 	if length>1.5:
@@ -438,9 +467,265 @@ func shot(origin: Vector3, hit: Vector3, solid: bool) -> bool:
 		fly.tween_property(tracer,"global_position",to,clampf(length/260.0,0.02,0.09))
 		fly.tween_callback(tracer.hide)
 	if not solid: return false
-	var puff: CPUParticles3D=_puffs[_puff_next]
-	_puff_next=(_puff_next+1)%_puffs.size()
-	puff.global_position=hit
-	puff.direction=(origin-hit).normalized()
-	puff.restart()
+	if normal==Vector3.ZERO: normal=(origin-hit).normalized()
+	impact(hit,normal,(hit-origin).normalized(),kind)
 	return true
+
+
+# ---------- zásah do povrchu ----------
+
+func _ramp(offsets: Array, colors: Array) -> GradientTexture1D:
+	var g:=Gradient.new()
+	g.offsets=PackedFloat32Array(offsets)
+	g.colors=PackedColorArray(colors)
+	var t:=GradientTexture1D.new()
+	t.gradient=g
+	return t
+
+func _curve(points: Array) -> CurveTexture:
+	var c:=Curve.new()
+	for p in points: c.add_point(p)
+	var t:=CurveTexture.new()
+	t.curve=c
+	return t
+
+func _gp(amount: int, lifetime: float, mesh: Mesh, pm: ParticleProcessMaterial) -> GPUParticles3D:
+	var p:=GPUParticles3D.new()
+	p.one_shot=true
+	p.emitting=false
+	p.amount=amount
+	p.lifetime=lifetime
+	p.explosiveness=1.0
+	p.local_coords=false
+	p.process_material=pm
+	p.draw_pass_1=mesh
+	p.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.visibility_aabb=AABB(Vector3(-3,-3,-3),Vector3(6,6,6))
+	add_child(p)
+	return p
+
+func _quad(size: Vector2, mat: Material) -> QuadMesh:
+	var q:=QuadMesh.new()
+	q.size=size
+	q.material=mat
+	return q
+
+func _make_impact() -> Dictionary:
+	var slot:={}
+	# Jiskry: krátké žhavé čárky protažené ve směru letu, odskočí a padají.
+	var spark_mat:=StandardMaterial3D.new()
+	spark_mat.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	spark_mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
+	spark_mat.blend_mode=BaseMaterial3D.BLEND_MODE_ADD
+	spark_mat.vertex_color_use_as_albedo=true
+	spark_mat.albedo_texture=load("res://assets/fx/spark.png")
+	spark_mat.albedo_color=Color(6.0,2.6,0.8)
+	spark_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
+	var pm:=ParticleProcessMaterial.new()
+	pm.direction=Vector3(0,1,0)
+	pm.spread=32.0
+	pm.initial_velocity_min=3.5
+	pm.initial_velocity_max=11.0
+	pm.gravity=Vector3(0,-9.8,0)
+	pm.damping_min=1.0
+	pm.damping_max=3.5
+	pm.scale_min=0.45
+	pm.scale_max=1.15
+	pm.color_ramp=_ramp([0.0,0.2,0.65,1.0],[Color(1,0.85,0.55,1),Color(1,0.55,0.18,1),Color(0.95,0.28,0.06,0.65),Color(0.7,0.12,0.02,0)])
+	var sparks:=_gp(12,0.32,_quad(Vector2(0.007,0.085),spark_mat),pm)
+	sparks.transform_align=GPUParticles3D.TRANSFORM_ALIGN_Z_BILLBOARD_Y_TO_VELOCITY
+	slot.sparks=sparks
+	# Keramický prach vystřelený z rány: rychlé šedé proužky, které se hned zabrzdí.
+	var pow_mat:=StandardMaterial3D.new()
+	pow_mat.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	pow_mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
+	pow_mat.vertex_color_use_as_albedo=true
+	pow_mat.albedo_texture=load("res://assets/fx/spark.png")
+	pow_mat.cull_mode=BaseMaterial3D.CULL_DISABLED
+	var pm2:=ParticleProcessMaterial.new()
+	pm2.direction=Vector3(0,1,0)
+	pm2.spread=42.0
+	pm2.initial_velocity_min=1.5
+	pm2.initial_velocity_max=7.5
+	pm2.gravity=Vector3(0,-3.0,0)
+	pm2.damping_min=7.0
+	pm2.damping_max=12.0
+	pm2.scale_min=0.6
+	pm2.scale_max=1.4
+	pm2.color_ramp=_ramp([0.0,1.0],[Color(0.82,0.8,0.76,0.55),Color(0.8,0.78,0.74,0.0)])
+	var powder:=_gp(26,0.42,_quad(Vector2(0.012,0.07),pow_mat),pm2)
+	powder.transform_align=GPUParticles3D.TRANSFORM_ALIGN_Z_BILLBOARD_Y_TO_VELOCITY
+	slot.powder=powder
+	# Střepy glazury: tenké lesklé šupinky, točí se, odskočí od podlahy a zmizí.
+	var chip_mat:=StandardMaterial3D.new()
+	chip_mat.vertex_color_use_as_albedo=true
+	chip_mat.roughness=0.28
+	chip_mat.metallic_specular=0.6
+	var chip:=BoxMesh.new()
+	chip.size=Vector3(0.016,0.004,0.012)
+	chip.material=chip_mat
+	var pm3:=ParticleProcessMaterial.new()
+	pm3.direction=Vector3(0,1,0)
+	pm3.spread=58.0
+	pm3.initial_velocity_min=1.2
+	pm3.initial_velocity_max=4.6
+	pm3.gravity=Vector3(0,-9.8,0)
+	pm3.particle_flag_rotate_y=true
+	pm3.angle_min=-180.0
+	pm3.angle_max=180.0
+	pm3.angular_velocity_min=-900.0
+	pm3.angular_velocity_max=900.0
+	pm3.scale_min=0.5
+	pm3.scale_max=1.6
+	pm3.scale_curve=_curve([Vector2(0,1),Vector2(0.82,1),Vector2(1,0)])
+	pm3.color_initial_ramp=_ramp([0.0,0.5,1.0],[Color(0.95,0.94,0.9),Color(0.82,0.8,0.75),Color(0.62,0.6,0.56)])
+	pm3.collision_mode=ParticleProcessMaterial.COLLISION_RIGID
+	pm3.collision_bounce=0.28
+	pm3.collision_friction=0.7
+	var chips:=_gp(14,1.7,chip,pm3)
+	chips.collision_base_size=0.008
+	slot.chips=chips
+	# Oblak prachu: osvětlené měkké chomáče, rozšíří se a pomalu klesají.
+	var dust_mat:=StandardMaterial3D.new()
+	dust_mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
+	dust_mat.billboard_mode=BaseMaterial3D.BILLBOARD_PARTICLES
+	dust_mat.billboard_keep_scale=true
+	dust_mat.vertex_color_use_as_albedo=true
+	dust_mat.albedo_texture=load("res://assets/fx/dust_puff.png")
+	dust_mat.particles_anim_h_frames=2
+	dust_mat.particles_anim_v_frames=2
+	dust_mat.particles_anim_loop=false
+	dust_mat.proximity_fade_enabled=true
+	dust_mat.proximity_fade_distance=0.18
+	dust_mat.roughness=1.0
+	dust_mat.disable_receive_shadows=true
+	var pm4:=ParticleProcessMaterial.new()
+	pm4.direction=Vector3(0,1,0)
+	pm4.spread=24.0
+	pm4.initial_velocity_min=0.5
+	pm4.initial_velocity_max=3.2
+	pm4.gravity=Vector3(0,-0.3,0)
+	pm4.damping_min=4.0
+	pm4.damping_max=8.0
+	pm4.anim_offset_max=1.0
+	pm4.angle_min=-180.0
+	pm4.angle_max=180.0
+	pm4.angular_velocity_min=-50.0
+	pm4.angular_velocity_max=50.0
+	pm4.scale_min=0.6
+	pm4.scale_max=1.3
+	pm4.scale_curve=_curve([Vector2(0,0.22),Vector2(0.25,0.75),Vector2(1,1)])
+	pm4.color_ramp=_ramp([0.0,0.06,0.4,1.0],[Color(1,1,1,0.0),Color(1,1,1,0.75),Color(1,1,1,0.42),Color(1,1,1,0.0)])
+	pm4.color=Color(0.82,0.8,0.76)
+	slot.dust=_gp(16,1.6,_quad(Vector2(0.2,0.2),dust_mat),pm4)
+	var pm5:ParticleProcessMaterial=pm4.duplicate()
+	pm5.initial_velocity_min=0.15
+	pm5.initial_velocity_max=0.55
+	pm5.damping_min=1.0
+	pm5.damping_max=2.0
+	pm5.gravity=Vector3(0,-0.12,0)
+	pm5.color_ramp=_ramp([0.0,0.2,1.0],[Color(1,1,1,0.0),Color(1,1,1,0.28),Color(1,1,1,0.0)])
+	slot.linger=_gp(4,3.0,_quad(Vector2(0.36,0.36),dust_mat),pm5)
+	# Pod vodou: bublinky z rány.
+	var bub_mat:=StandardMaterial3D.new()
+	bub_mat.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	bub_mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
+	bub_mat.billboard_mode=BaseMaterial3D.BILLBOARD_PARTICLES
+	bub_mat.vertex_color_use_as_albedo=true
+	bub_mat.albedo_texture=_dot()
+	var pm6:=ParticleProcessMaterial.new()
+	pm6.direction=Vector3(0,1,0)
+	pm6.spread=70.0
+	pm6.initial_velocity_min=0.3
+	pm6.initial_velocity_max=1.4
+	pm6.gravity=Vector3(0,1.8,0)
+	pm6.damping_min=1.5
+	pm6.damping_max=3.0
+	pm6.turbulence_enabled=true
+	pm6.turbulence_noise_strength=0.4
+	pm6.scale_min=0.4
+	pm6.scale_max=1.3
+	pm6.color_ramp=_ramp([0.0,0.8,1.0],[Color(0.85,0.95,1,0.7),Color(0.85,0.95,1,0.5),Color(0.85,0.95,1,0)])
+	slot.bubbles=_gp(16,1.3,_quad(Vector2(0.018,0.018),bub_mat),pm6)
+	# Záblesk v místě zásahu (2 snímky).
+	var flash_mat:=StandardMaterial3D.new()
+	flash_mat.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	flash_mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
+	flash_mat.blend_mode=BaseMaterial3D.BLEND_MODE_ADD
+	flash_mat.billboard_mode=BaseMaterial3D.BILLBOARD_ENABLED
+	flash_mat.albedo_texture=load("res://assets/fx/glint.png")
+	flash_mat.albedo_color=Color(1.7,1.25,0.85)
+	var flash:=MeshInstance3D.new()
+	flash.mesh=_quad(Vector2(0.11,0.11),flash_mat)
+	flash.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	flash.visible=false
+	add_child(flash)
+	slot.flash=flash
+	# Podlaha pod zásahem pro odskok střepů (posouvá se s každým zásahem).
+	var floor_box:=GPUParticlesCollisionBox3D.new()
+	floor_box.size=Vector3(3.0,0.4,3.0)
+	floor_box.visible=false
+	add_child(floor_box)
+	slot.floor=floor_box
+	return slot
+
+func _aim(node: Node3D, at: Vector3, up: Vector3) -> void:
+	# Lokální osa Y emitoru = směr výletu.
+	var y:=up.normalized()
+	var x:=y.cross(Vector3.FORWARD if absf(y.z)<0.9 else Vector3.RIGHT).normalized()
+	node.global_transform=Transform3D(Basis(x,y,x.cross(y)),at)
+
+## Zásah střely do povrchu. kind: "tile" (obklad) nebo "prop" (věci).
+func impact(point: Vector3, normal: Vector3, direction: Vector3, kind:="tile") -> void:
+	var slot: Dictionary=_imp[_imp_next]
+	_imp_next=(_imp_next+1)%_imp.size()
+	var n:=normal.normalized()
+	var refl:=direction.bounce(n).normalized()
+	var at:=point+n*0.012
+	if point.y<water_y-0.03:
+		_aim(slot.bubbles,at,n)
+		slot.bubbles.amount_ratio=randf_range(0.5,1.0)
+		slot.bubbles.restart()
+		return
+	var tile: bool=kind=="tile"
+	# jiskry: směs normály a odrazu, ne každá rána jiskří
+	if randf()<(0.75 if tile else 0.45):
+		_aim(slot.sparks,at,(n*0.55+refl*0.45).normalized())
+		slot.sparks.amount_ratio=randf_range(0.35,1.0)
+		slot.sparks.restart()
+		var flash: MeshInstance3D=slot.flash
+		flash.global_position=at+n*0.02
+		flash.scale=Vector3.ONE*randf_range(0.7,1.3)
+		flash.visible=true
+		get_tree().create_timer(0.034).timeout.connect(flash.hide)
+		var light: OmniLight3D=_imp_lights[_imp_light_next]
+		_imp_light_next=(_imp_light_next+1)%_imp_lights.size()
+		light.global_position=at+n*0.3
+		light.visible=true
+		light.light_energy=0.45
+		var tw:=create_tween()
+		tw.tween_property(light,"light_energy",0.0,0.07)
+		tw.tween_callback(light.hide)
+	_aim(slot.powder,at,(n*0.8+refl*0.2).normalized())
+	slot.powder.amount_ratio=randf_range(0.6,1.0)
+	slot.powder.restart()
+	var dust_col:=Color(0.82,0.8,0.76) if tile else Color(0.55,0.52,0.48)
+	(slot.dust.process_material as ParticleProcessMaterial).color=dust_col
+	(slot.linger.process_material as ParticleProcessMaterial).color=dust_col
+	_aim(slot.dust,at,n)
+	slot.dust.amount_ratio=randf_range(0.6,1.0)
+	slot.dust.restart()
+	_aim(slot.linger,at,n)
+	slot.linger.restart()
+	# střepy dopadnou na podlahu pod zásahem
+	var below:=get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(at+n*0.05,at+n*0.05+Vector3.DOWN*3.0,1))
+	var floor_box: GPUParticlesCollisionBox3D=slot.floor
+	if not below.is_empty():
+		floor_box.global_position=Vector3(at.x,below.position.y-0.2,at.z)
+		floor_box.visible=true
+	else:
+		floor_box.visible=false
+	(slot.chips.process_material as ParticleProcessMaterial).color=Color(1,1,1) if tile else Color(0.5,0.47,0.44)
+	_aim(slot.chips,at,(n*0.85+refl*0.15).normalized())
+	slot.chips.amount_ratio=randf_range(0.35,0.9) if tile else 0.3
+	slot.chips.restart()

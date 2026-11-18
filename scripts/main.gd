@@ -3217,8 +3217,8 @@ func _combat_fx() -> Node3D:
 		ZombieScript.splash=splash_at
 	return _fx
 
-func _shot_effects(origin: Vector3, hit: Vector3, solid: bool) -> void:
-	if _combat_fx().shot(origin,hit,solid): sfx.play_at("tick",hit,-7.0,randf_range(0.7,1.1))
+func _shot_effects(origin: Vector3, hit: Vector3, solid: bool, normal:=Vector3.ZERO, kind:="tile") -> void:
+	if _combat_fx().shot(origin,hit,solid,normal,kind): sfx.play_at("tick",hit,-7.0,randf_range(0.7,1.1))
 
 var _marker: Control
 var _marker_tween: Tween
@@ -3297,6 +3297,7 @@ func _weapon_fired(_origin: Vector3, hit: Vector3) -> void:
 	var power:=1.0
 	var solid:=false
 	var normal:=Vector3.UP
+	var hit_kind:="tile"
 	var exclude: Array[RID]=[]
 	# Střela projde až dvěma těly; každé jí ubere sílu.
 	for pass_index in 3:
@@ -3314,6 +3315,7 @@ func _weapon_fired(_origin: Vector3, hit: Vector3) -> void:
 		if not target.collider.has_meta("zombie"):
 			solid=true
 			normal=target.normal
+			hit_kind="tile" if target.collider==world_body else "prop"
 			break
 		var victim: Node3D=target.collider.get_meta("zombie")
 		var bone: int=target.collider.get_meta("bone")
@@ -3344,7 +3346,7 @@ func _weapon_fired(_origin: Vector3, hit: Vector3) -> void:
 				sim.add_impulse(Vector2(surface.x,surface.z),0.2,-1.0)
 				sfx.play_at("step_water",surface,-7.0,1.35)
 				break
-	_shot_effects(muzzle,end,solid and not wet)
+	_shot_effects(muzzle,end,solid and not wet,normal,hit_kind)
 	if solid: _combat_fx().hole(end,normal)
 
 func _melee(origin: Vector3, direction: Vector3) -> void:

@@ -80,6 +80,7 @@ var _rpitch:=1.0
 var _pap:={}                  # zbraně pokřtěné v andělově vodě (náš Pack-a-Punch)
 var _pap_mat: ShaderMaterial
 var _pap_lights: Array=[]
+var _pap_arcs: Array=[]          # výboje po povrchu zbraní (stupeň 3 a 4)
 var _pap_strength:=1.0
 var _pap_surge:=0.0
 var holster:=0.0             # 0 držení, 1 zbraň schovaná pod obrazem
@@ -1117,7 +1118,7 @@ func set_look(name: String, t: int) -> void:
 		if old:
 			model.remove_child(old)
 			old.queue_free()
-		if t>0 and (float(look[6])>0.0 or bool(look[7])): _make_pap_fx(model,look)
+		if t>0 and (float(look[6])>0.0 or bool(look[7])): _make_pap_fx(model,look+[t])
 	if t>0: _pap_strength=0.0          # nová kamufláž se rozlije postupně
 	if name==gun: _update_flash_tint()
 
@@ -1149,9 +1150,12 @@ func _make_pap_fx(model: Node3D, look: Array) -> void:
 	fx.add_child(light)
 	_pap_lights.append(light)
 	if not bool(look[7]): return
+	var t: int=look[8] if look.size()>8 else 3
+	var angel: bool=t>=4
+	# Jiskřičky: stupeň 3 žhavé uhlíky stoupající v turbulenci, stupeň 4 třpytivé hvězdičky.
 	var parts:=GPUParticles3D.new()
-	parts.amount=26
-	parts.lifetime=1.5
+	parts.amount=16 if angel else 22
+	parts.lifetime=1.6 if angel else 0.95
 	parts.local_coords=false
 	parts.layers=layer
 	parts.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1159,47 +1163,201 @@ func _make_pap_fx(model: Node3D, look: Array) -> void:
 	parts.visibility_aabb=AABB(-box.size-Vector3.ONE*0.5,box.size*2.0+Vector3.ONE)
 	var pm:=ParticleProcessMaterial.new()
 	pm.emission_shape=ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	pm.emission_box_extents=box.size*0.5
+	pm.emission_box_extents=box.size*0.45
 	pm.direction=Vector3(0,1,0)
-	pm.spread=180.0
-	pm.initial_velocity_min=0.01
-	pm.initial_velocity_max=0.05
-	pm.gravity=Vector3(0,0.09,0)
-	pm.damping_min=0.02
-	pm.damping_max=0.06
+	pm.spread=70.0
+	pm.initial_velocity_min=0.02 if angel else 0.08
+	pm.initial_velocity_max=0.08 if angel else 0.4
+	pm.gravity=Vector3(0,0.05 if angel else 0.35,0)
+	pm.damping_min=0.5
+	pm.damping_max=1.5
+	pm.turbulence_enabled=true
+	pm.turbulence_noise_strength=0.6 if angel else 1.4
+	pm.turbulence_noise_scale=1.2
+	pm.turbulence_noise_speed=Vector3(0.0,0.6,0.0)
+	pm.turbulence_influence_min=0.05
+	pm.turbulence_influence_max=0.25
 	pm.scale_min=0.5
 	pm.scale_max=1.3
-	var fade:=Curve.new()
-	fade.add_point(Vector2(0.0,0.0))
-	fade.add_point(Vector2(0.15,1.0))
-	fade.add_point(Vector2(1.0,0.0))
-	var fade_tex:=CurveTexture.new()
-	fade_tex.curve=fade
-	pm.scale_curve=fade_tex
-	parts.process_material=pm
+	pm.scale_curve=_pap_curve([Vector2(0,0),Vector2(0.12,1),Vector2(0.5,0.55 if angel else 0.8),Vector2(0.62,1.0 if angel else 0.7),Vector2(1,0)])
 	var g:=Gradient.new()
-	g.offsets=PackedFloat32Array([0.0,0.35,1.0])
-	g.colors=PackedColorArray([Color(1,1,1,1),Color(col.lerp(Color.WHITE,0.4),0.6),Color(col,0.0)])
-	var tex:=GradientTexture2D.new()
-	tex.gradient=g
-	tex.fill=GradientTexture2D.FILL_RADIAL
-	tex.fill_from=Vector2(0.5,0.5)
-	tex.fill_to=Vector2(1.0,0.5)
-	tex.width=32
-	tex.height=32
+	g.offsets=PackedFloat32Array([0.0,0.3,1.0])
+	if angel: g.colors=PackedColorArray([Color(1,1,1,1),Color(col.lerp(Color.WHITE,0.5),0.9),Color(col,0.0)])
+	else: g.colors=PackedColorArray([Color(1,0.9,0.75,1),Color(col.lerp(Color(1,0.5,0.2),0.4),1),Color(col*0.6,0.0)])
+	var ramp:=GradientTexture1D.new()
+	ramp.gradient=g
+	pm.color_ramp=ramp
+	parts.process_material=pm
 	var mat:=StandardMaterial3D.new()
 	mat.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.blend_mode=BaseMaterial3D.BLEND_MODE_ADD
-	mat.billboard_mode=BaseMaterial3D.BILLBOARD_PARTICLES
-	mat.albedo_texture=tex
-	mat.albedo_color=Color(col.r*2.2,col.g*2.2,col.b*2.2)
+	mat.vertex_color_use_as_albedo=true
 	mat.disable_fog=true
+	mat.cull_mode=BaseMaterial3D.CULL_DISABLED
 	var quad:=QuadMesh.new()
-	quad.size=Vector2(0.014,0.014)
+	if angel:
+		mat.billboard_mode=BaseMaterial3D.BILLBOARD_PARTICLES
+		mat.albedo_texture=load("res://assets/fx/glint.png")
+		mat.albedo_color=Color(2.4,2.4,2.4)
+		quad.size=Vector2(0.03,0.03)
+	else:
+		mat.albedo_texture=load("res://assets/fx/spark.png")
+		mat.albedo_color=Color(3.2,1.7,1.1)
+		quad.size=Vector2(0.004,0.03)
+		parts.transform_align=GPUParticles3D.TRANSFORM_ALIGN_Z_BILLBOARD_Y_TO_VELOCITY
 	quad.material=mat
 	parts.draw_pass_1=quad
 	fx.add_child(parts)
+	# Elektrické výboje po povrchu zbraně.
+	var arc_mat:=ShaderMaterial.new()
+	arc_mat.shader=load("res://shaders/arc.gdshader")
+	arc_mat.set_shader_parameter("tint",col)
+	arc_mat.set_shader_parameter("energy",1.6 if angel else 2.6)
+	var im:=ImmediateMesh.new()
+	var mi:=MeshInstance3D.new()
+	mi.name="Arcs"
+	mi.mesh=im
+	mi.material_override=arc_mat
+	mi.layers=layer
+	mi.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.extra_cull_margin=1.0
+	fx.add_child(mi)
+	# Body na povrchu zbraně (podle plochy trojúhelníků), v souřadnicích efektu.
+	var to_fx:=fx.transform.affine_inverse()
+	var tris: Array=[]
+	var areas: Array=[]
+	var total:=0.0
+	for m in meshes:
+		var mm: MeshInstance3D=m
+		if mm.mesh==null: continue
+		var xf: Transform3D=to_fx*Props._xf(mm,model)
+		var faces:=mm.mesh.get_faces()
+		for k in range(0,faces.size(),3):
+			var a3: Vector3=xf*faces[k]
+			var b3: Vector3=xf*faces[k+1]
+			var c3: Vector3=xf*faces[k+2]
+			var ar:=(b3-a3).cross(c3-a3).length()*0.5
+			if ar<1e-7: continue
+			tris.append([a3,b3,c3])
+			total+=ar
+			areas.append(total)
+	var samples:=PackedVector3Array()
+	if total>0.0:
+		for k in 320:
+			var r:=randf()*total
+			var idx:=areas.bsearch(r)
+			var tri: Array=tris[mini(idx,tris.size()-1)]
+			var u:=randf()
+			var v:=randf()
+			if u+v>1.0:
+				u=1.0-u
+				v=1.0-v
+			samples.append(tri[0]+(tri[1]-tri[0])*u+(tri[2]-tri[0])*v)
+	var axis:=Vector3.FORWARD
+	if box.size.x>=box.size.y and box.size.x>=box.size.z: axis=Vector3.RIGHT
+	elif box.size.y>=box.size.z: axis=Vector3.UP
+	_pap_arcs.append({"fx":fx,"mi":mi,"mesh":im,"samples":samples,"center":center,"axis":axis,
+		"arcs":[],"rate":(5.0 if angel else 16.0),"len":(0.16 if angel else 0.22),"angel":angel,"light":light,"spawn":0.0})
+
+func _pap_curve(points: Array) -> CurveTexture:
+	var c:=Curve.new()
+	for p in points: c.add_point(p)
+	var t:=CurveTexture.new()
+	t.curve=c
+	return t
+
+## Klikatý blesk mezi dvěma body: dělení úseček s náhodným odklonem, prohnutý od zbraně ven.
+func _arc_points(a: Vector3, b: Vector3, out: Vector3) -> PackedVector3Array:
+	var pts:=PackedVector3Array([a,b])
+	var amp:=a.distance_to(b)*0.22
+	for level in 4:
+		var next:=PackedVector3Array()
+		for i in pts.size()-1:
+			next.append(pts[i])
+			var mid:=(pts[i]+pts[i+1])*0.5
+			mid+=Vector3(randf_range(-1,1),randf_range(-1,1),randf_range(-1,1))*amp
+			next.append(mid)
+		next.append(pts[pts.size()-1])
+		pts=next
+		amp*=0.5
+	var n:=pts.size()-1
+	var bulge:=a.distance_to(b)*0.28
+	for i in pts.size():
+		pts[i]+=out*bulge*sin(PI*float(i)/float(n))
+	return pts
+
+func _update_pap_arcs(dt: float) -> void:
+	var cam:=get_viewport().get_camera_3d() if is_inside_tree() else null
+	for i in range(_pap_arcs.size()-1,-1,-1):
+		var e: Dictionary=_pap_arcs[i]
+		if not is_instance_valid(e.fx):
+			_pap_arcs.remove_at(i)
+			continue
+		var fx: Node3D=e.fx
+		var im: ImmediateMesh=e.mesh
+		im.clear_surfaces()
+		if cam==null or not fx.is_visible_in_tree() or (e.samples as PackedVector3Array).size()<2: continue
+		var samples: PackedVector3Array=e.samples
+		var arcs: Array=e.arcs
+		# nové výboje (Poissonův proces), občas jeden velký přes celou zbraň
+		e.spawn=float(e.spawn)+dt*float(e.rate)*(0.6+_pap_surge*3.0)
+		while float(e.spawn)>=1.0 and arcs.size()<6:
+			e.spawn=float(e.spawn)-1.0
+			var a: Vector3=samples[randi()%samples.size()]
+			var big:=randf()<0.12
+			var want: float=float(e.len)*(randf_range(1.6,2.6) if big else randf_range(0.35,1.0))
+			var b:=a
+			for tries in 14:
+				var c: Vector3=samples[randi()%samples.size()]
+				if absf(c.distance_to(a)-want)<absf(b.distance_to(a)-want): b=c
+			if a.distance_to(b)<0.02: continue
+			var life:=randf_range(0.07,0.16)*(1.6 if big else 1.0)
+			arcs.append({"a":a,"b":b,"life":life,"max":life,"w":(1.6 if big else 1.0),"pts":PackedVector3Array(),"jit":0.0})
+		if float(e.spawn)>=1.0: e.spawn=0.0
+		var to_local:=fx.global_transform.affine_inverse()
+		var eye: Vector3=to_local*cam.global_position
+		var center: Vector3=e.center
+		var axis: Vector3=e.axis
+		var glow:=0.0
+		var drawn:=false
+		for k in range(arcs.size()-1,-1,-1):
+			var arc: Dictionary=arcs[k]
+			arc.life=float(arc.life)-dt
+			if float(arc.life)<=0.0:
+				arcs.remove_at(k)
+				continue
+			arc.jit=float(arc.jit)-dt
+			if float(arc.jit)<=0.0 or (arc.pts as PackedVector3Array).is_empty():
+				arc.jit=0.025
+				var mid: Vector3=(arc.a+arc.b)*0.5-center
+				var out:=(mid-axis*mid.dot(axis))
+				out=out.normalized() if out.length_squared()>1e-6 else Vector3.UP
+				arc.pts=_arc_points(arc.a,arc.b,out)
+			var fade: float=sqrt(float(arc.life)/float(arc.max))*randf_range(0.55,1.0)
+			glow+=fade*float(arc.w)
+			var pts: PackedVector3Array=arc.pts
+			if not drawn:
+				im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+				drawn=true
+			for pass_i in 2:
+				var w: float=(0.011 if pass_i==0 else 0.0032)*float(arc.w)
+				var core: float=0.0 if pass_i==0 else 1.0
+				for j in pts.size()-1:
+					var p0: Vector3=pts[j]
+					var p1: Vector3=pts[j+1]
+					var side:=(p1-p0).cross(eye-p0)
+					if side.length_squared()<1e-12: continue
+					side=side.normalized()*w
+					im.surface_set_color(Color(1,1,1,fade*(0.35 if pass_i==0 else 0.9)))
+					im.surface_set_uv(Vector2(0,core)); im.surface_add_vertex(p0-side)
+					im.surface_set_uv(Vector2(1,core)); im.surface_add_vertex(p0+side)
+					im.surface_set_uv(Vector2(1,core)); im.surface_add_vertex(p1+side)
+					im.surface_set_uv(Vector2(0,core)); im.surface_add_vertex(p0-side)
+					im.surface_set_uv(Vector2(1,core)); im.surface_add_vertex(p1+side)
+					im.surface_set_uv(Vector2(0,core)); im.surface_add_vertex(p1-side)
+		if drawn: im.surface_end()
+		e.glow=glow
 
 func _update_pap(dt: float) -> void:
 	if _pap.is_empty(): return
@@ -1210,6 +1368,9 @@ func _update_pap(dt: float) -> void:
 		var m: ShaderMaterial=_tier_mats[t]
 		m.set_shader_parameter("strength",smoothstep(0.0,1.0,_pap_strength))
 		m.set_shader_parameter("surge",_pap_surge if t==cur else 0.0)
+	_update_pap_arcs(dt)
+	var arc_glow:={}
+	for e in _pap_arcs: arc_glow[e.light]=float(e.get("glow",0.0))
 	var flick:=1.0+0.24*sin(_time*3.1)+0.14*sin(_time*7.7)
 	for i in range(_pap_lights.size()-1,-1,-1):
 		var l=_pap_lights[i]
@@ -1218,7 +1379,9 @@ func _update_pap(dt: float) -> void:
 			_pap_fx_light.erase(l)
 			continue
 		var base: float=float(_pap_fx_light.get(l,0.4))
-		(l as OmniLight3D).light_energy=(base*flick+_pap_surge*base*3.0)*_pap_strength
+		# světlo zablikne s každým výbojem
+		var zap: float=minf(float(arc_glow.get(l,0.0)),2.0)*0.9
+		(l as OmniLight3D).light_energy=(base*flick+base*zap+_pap_surge*base*3.0)*_pap_strength
 
 func _update_flash_tint() -> void:
 	# Záblesk výstřelu v barvě stupně (obyčejná zbraň: oranžový).

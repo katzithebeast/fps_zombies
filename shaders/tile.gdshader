@@ -56,7 +56,9 @@ vec3 caustic(vec2 uv) {
 void fragment() {
 	float dy = wpos.y - water_level;
 	// zrcadlová kamera (planární odraz) je pod hladinou: vše pod vodou oříznout
-	if (CAMERA_POSITION_WORLD.y < water_level && dy < -0.004) discard;
+	// Jen kamery, které nevidí vodu (vrstva 2): zrcadlová kamera odrazu a sondy. Hráč ve vypuštěném
+	// bazénu (kamera pod y=0) dřív nechal zmizet vše pod hladinou.
+	if ((CAMERA_VISIBLE_LAYERS & 2u) == 0u && CAMERA_POSITION_WORLD.y < water_level && dy < -0.004) discard;
 
 	vec2 uv = UV / tex_world * tile_scale;
 	vec2 id = floor(uv * tiles_per_tex);
