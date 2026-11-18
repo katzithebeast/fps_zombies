@@ -338,6 +338,27 @@ func update_body(dt: float, feet: Vector3, look_yaw: float, movement: Vector3, c
 	weapon.pose(dt,swimming)
 	weapon.pose_first_person()
 
+## Vzhled obleku z menu Customize: [oblek, rukavice+boty+maska, hledí, vzor, barva vzoru, měřítko].
+static func valid_look(look: Variant) -> bool:
+	if not look is Array or look.size() != 6: return false
+	for i in [0, 1, 2, 4]:
+		if not look[i] is Color: return false
+	return typeof(look[3]) in [TYPE_INT, TYPE_FLOAT] and int(look[3]) >= 0 and int(look[3]) <= 6 \
+		and typeof(look[5]) in [TYPE_INT, TYPE_FLOAT] and is_finite(float(look[5])) and float(look[5]) >= 0.2 and float(look[5]) <= 4.0
+
+static func apply_look_to(mesh: GeometryInstance3D, look: Array) -> void:
+	if mesh == null or not valid_look(look): return
+	mesh.set_instance_shader_parameter("suit_col", look[0])
+	mesh.set_instance_shader_parameter("rubber_col", look[1])
+	mesh.set_instance_shader_parameter("visor_col", look[2])
+	mesh.set_instance_shader_parameter("pattern", float(look[3]))
+	mesh.set_instance_shader_parameter("pattern_col", look[4])
+	mesh.set_instance_shader_parameter("pattern_scale", float(look[5]))
+
+func apply_look(look: Array) -> void:
+	apply_look_to(skeleton.get_node_or_null(BODY_NODE), look)
+	apply_look_to(first_mesh, look)
+
 ## Mokrý oblek: světová výška, kam sahala voda (oblek tam ztmavne a leskne se, pomalu schne).
 var _wet_line := -100.0
 func update_wetness(dt: float, water_y: float, feet_y: float) -> void:

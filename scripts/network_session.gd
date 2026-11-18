@@ -6,6 +6,7 @@ signal closed(message: String)
 signal status_changed(message: String)
 signal roster_changed
 signal remote_joined(id: int, display_name: String)
+signal look_received(id: int, look: Array)
 signal remote_left(id: int)
 signal state_received(id: int, state: Array)
 signal action_received(id: int, kind: String, data: Array)
@@ -30,6 +31,10 @@ var connecting := false
 var port := DEFAULT_PORT
 var local_name := "Hráč"
 var names := {}
+const PlayerBodyScript := preload("res://scripts/player_body.gd")
+var _last_look := {}
+var looks := {}                 # id → vzhled obleku (menu Customize)
+var local_look: Array = []
 var slots := {}
 var states := {}
 var sample_owner := 0
@@ -165,6 +170,7 @@ func _peer_disconnected(id: int) -> void:
 	_last_action.erase(id)
 	_last_water.erase(id)
 	_last_state.erase(id)
+	looks.erase(id)
 	if names.has(id):
 		names.erase(id)
 		remote_left.emit(id)
@@ -186,6 +192,8 @@ func _hello(protocol: String, display_name: String) -> void:
 	names[id] = clean_name(display_name)
 	slots[id] = slot
 	_welcome.rpc_id(id, names, states, sample_owner, slot)
+	for other in looks:
+		if other != id: _look.rpc_id(id, other, looks[other])
 	_roster.rpc(names)
 	remote_joined.emit(id, names[id])
 	roster_changed.emit()
@@ -207,6 +215,7 @@ func _welcome(roster: Dictionary, initial_states: Dictionary, owner: int, slot: 
 			state_received.emit(id, states[id])
 	sample_owner = owner
 	if owner != 0: sample_changed.emit(owner)
+	if not local_look.is_empty(): _submit_look.rpc_id(1, local_look)
 	_set_status("Připojeno · %d/%d hráči" % [names.size(), MAX_PLAYERS])
 
 @rpc("authority", "call_remote", "reliable", 0)
@@ -401,3 +410,29 @@ func connection_text() -> String:
 func _exit_tree() -> void:
 	_mapper_stop()
 	if _peer: _peer.close()
+
+
+# --- vzhled obleku hráčů
+func set_local_look(look: Array) -> void:
+	local_look = look.duplicate()
+	if not active: return
+	if multiplayer.is_server():
+		looks[1] = local_look
+		_look.rpc(1, local_look)
+	else:
+		_submit_look.rpc_id(1, local_look)
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func _submit_look(look: Array) -> void:
+	if not active or not multiplayer.is_server(): return
+	var id := multiplayer.get_remote_sender_id()
+	if not names.has(id) or not PlayerBodyScript.valid_look(look) or not _allow(_last_look, id, 200): return
+	looks[id] = look
+	look_received.emit(id, look)
+	_look.rpc(id, look)
+
+@rpc("authority", "call_remote", "reliable", 0)
+func _look(id: int, look: Array) -> void:
+	if active and id != multiplayer.get_unique_id() and PlayerBodyScript.valid_look(look):
+		looks[id] = look
+		look_received.emit(id, look)

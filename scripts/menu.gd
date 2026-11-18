@@ -42,6 +42,8 @@ var _network_active := false
 var _intro: Tween
 var _footer: Label
 var _tabs: TabContainer
+const CustomizeScript := preload("res://scripts/customize_panel.gd")
+var _customize: PanelContainer
 
 func add_tab(title: String) -> VBoxContainer:
 	# Další záložka nastavení zvenku (testování).
@@ -88,6 +90,7 @@ func _ready() -> void:
 		else:
 			play_pressed.emit())
 	_button(_main_box, "Settings", func(): _show_settings(true))
+	_button(_main_box, "Customize", func(): _show_customize(true))
 	_button(_main_box, "Multiplayer", func(): _show_multiplayer(true))
 	_button(_main_box, "Quit", func(): quit_pressed.emit())
 	_footer = Label.new()
@@ -97,6 +100,13 @@ func _ready() -> void:
 	_footer.modulate = Color(0.58, 0.69, 0.67, 0.85)
 	_root.add_child(_footer)
 	_build_multiplayer()
+	_customize = CustomizeScript.new(s)
+	_customize.position = Vector2(150, 110)
+	_customize.custom_minimum_size = Vector2(1060, 820)
+	_customize.visible = false
+	_customize.changed.connect(func(key: String, value: Variant): _change(key, value))
+	_customize.closed.connect(func(): _show_customize(false))
+	_root.add_child(_customize)
 
 	# --- nastavení
 	_settings_box = PanelContainer.new()
@@ -291,6 +301,7 @@ func _show_multiplayer(value: bool) -> void:
 	_multiplayer_box.visible = value
 	_main_box.visible = not value
 	_settings_box.visible = false
+	if _customize: _customize.visible = false
 
 func _make_theme() -> Theme:
 	var th := Theme.new()
@@ -442,7 +453,16 @@ func refresh() -> void:
 func _show_settings(v: bool) -> void:
 	_settings_box.visible = v
 	_multiplayer_box.visible = false
+	if _customize: _customize.visible = false
 	_main_box.visible = not v
+
+## Customize: vzhled obleku s živým náhledem postavy.
+func _show_customize(v: bool) -> void:
+	_customize.visible = v
+	_settings_box.visible = false
+	_multiplayer_box.visible = false
+	_main_box.visible = not v
+	if v: _customize.refresh()
 
 func open(game_running: bool) -> void:
 	in_game = game_running
@@ -467,6 +487,8 @@ func close() -> void:
 func back() -> void:
 	if _settings_box.visible:
 		_show_settings(false)
+	elif _customize.visible:
+		_show_customize(false)
 	elif _multiplayer_box.visible:
 		_show_multiplayer(false)
 	elif in_game:

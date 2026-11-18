@@ -5,6 +5,7 @@ Výstup:
   hazmat_wear.png   R špína (nohy, záhyby, šmouhy), G odřené hrany, B zaschlá krev, A zaschlé stopy vody
   hazmat_zones.png  R oblek, G guma (rukavice, boty, maska), B hledí
   hazmat_detail_n.png  jemná dlaždicová normála (struktura PVC fólie)
+  hazmat_pos.png    klidová poloha v modelu (pro vzory v shaderu, BOX_MIN/BOX_SIZE)
 Šum se počítá v prostoru modelu, takže masky na švech UV navazují."""
 import struct, numpy as np, os
 from PIL import Image
@@ -124,4 +125,8 @@ dx = (np.roll(hgt, -1, 1) - np.roll(hgt, 1, 1)) * 6
 dy = (np.roll(hgt, -1, 0) - np.roll(hgt, 1, 0)) * 6
 nn = np.stack([-dx, -dy, np.ones_like(dx)], 2); nn /= np.linalg.norm(nn, axis=2, keepdims=True)
 Image.fromarray(((nn * 0.5 + 0.5) * 255 + 0.5).astype(np.uint8), 'RGB').save(os.path.join(ASSET, 'hazmat_detail_n.png'))
+# --- klidová poloha v prostoru modelu (vzory obleku bez švů): RGB = (p - BOX_MIN) / BOX_SIZE
+BOX_MIN = np.array([-0.85, -0.1, -0.2]); BOX_SIZE = np.array([1.7, 2.2, 0.5])
+pn = np.clip((pos - BOX_MIN) / BOX_SIZE, 0, 1)
+Image.fromarray((pn * 255 + 0.5).astype(np.uint8), 'RGB').save(os.path.join(ASSET, 'hazmat_pos.png'))
 print('upečeno', R, 'texelů, pokryto', mask.mean().round(3))

@@ -1,4 +1,4 @@
-[gd_resource type="ShaderMaterial" load_steps=9 format=3]
+[gd_resource type="ShaderMaterial" load_steps=10 format=3]
 
 [ext_resource type="Shader" path="res://shaders/hazmat.gdshader" id="1_27hm5"]
 [ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_albedo.png" id="2_mie3v"]
@@ -8,6 +8,7 @@
 [ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_wear.png" id="6_wear"]
 [ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_zones.png" id="7_zones"]
 [ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_detail_n.png" id="8_detail"]
+[ext_resource type="Texture2D" path="res://assets/hazmat/hazmat_pos.png" id="9_pos"]
 
 [resource]
 render_priority = 0
@@ -19,3 +20,4 @@ shader_parameter/grime_tex = ExtResource("3_fv63n")
 shader_parameter/wear_tex = ExtResource("6_wear")
 shader_parameter/zones_tex = ExtResource("7_zones")
 shader_parameter/detail_tex = ExtResource("8_detail")
+shader_parameter/pos_tex = ExtResource("9_pos")

@@ -89,6 +89,9 @@ var settings := {
 	"perspective": 0, "tp_distance": 2.8, "tp_offset": 0.5, "tp_height": 1.45,
 	"tp_side": 0, "tp_fov": 70.0, "tp_smoothing": 0.55,
 	"player_name": "Hráč", "server_address": "", "server_port": 24567, "automatic_port": true,
+	# vzhled obleku (menu Customize)
+	"look_suit": Color(0.352, 0.552, 0.948), "look_rubber": Color(0.209, 0.209, 0.209), "look_visor": Color(0.863, 0.688, 0.19),
+	"look_pattern": 0, "look_pattern_color": Color(0.1, 0.12, 0.08), "look_pattern_scale": 1.0,
 }
 var lamps: Array[Dictionary] = []
 var splashes: Array[GPUParticles3D] = []
@@ -222,6 +225,7 @@ func _ready() -> void:
 	menu.resume_pressed.connect(_on_resume)
 	menu.quit_pressed.connect(func(): get_tree().quit())
 	_setup_network()
+	_apply_look()
 	mode = ModeScript.new()
 	mode.main = self
 	add_child(mode)
@@ -266,7 +270,21 @@ func _save_settings() -> void:
 		cf.set_value("s", k, settings[k])
 	cf.save(SETTINGS_PATH)
 
+## Vzhled obleku ze slovníku nastavení (pořadí jako PlayerBody.valid_look).
+func current_look() -> Array:
+	return [settings["look_suit"], settings["look_rubber"], settings["look_visor"], int(settings["look_pattern"]),
+		settings["look_pattern_color"], clampf(float(settings["look_pattern_scale"]), 0.2, 4.0)]
+
+func _apply_look() -> void:
+	var look := current_look()
+	if player and player.body: player.body.apply_look(look)
+	if network: network.set_local_look(look)
+
 func _on_setting_changed(key: String) -> void:
+	if key.begins_with("look_"):
+		_apply_look()
+		_save_settings()
+		return
 	apply_setting(key)
 	_save_settings()
 
@@ -2831,6 +2849,8 @@ func _setup_network() -> void:
 			sim.apply_network_impulse(Vector2(point.x, point.y), point.z, point.w))
 	network.pickup_requested.connect(_network_pickup_request)
 	network.sample_changed.connect(_network_sample_changed)
+	network.look_received.connect(func(id: int, look: Array):
+		if remote_players.has(id): remote_players[id].body.apply_look(look))
 	player.body.action_started.connect(network.send_action)
 	sim.impulse_added.connect(network.queue_water)
 	menu.host_pressed.connect(func(nick: String, port: int, automatic: bool):
@@ -2860,6 +2880,7 @@ func _network_state(sequence: int) -> Array:
 
 func _network_started(slot: int) -> void:
 	get_tree().paused = false
+	network.set_local_look(current_look())
 	if _intro_fade and _intro_fade.is_valid(): _intro_fade.kill()
 	_fade_rect.color.a = 0.0
 	_end_label.modulate.a = 0.0
@@ -2896,6 +2917,7 @@ func _remote_joined(id: int, nick: String) -> void:
 	_remote_root.add_child(remote)
 	remote.set_display_name(nick)
 	remote_players[id] = remote
+	if network.looks.has(id): remote.body.apply_look(network.looks[id])
 	toast(nick + " se připojil")
 	if network.active and multiplayer.is_server() and zombie.dead:
 		_zombie_killed.rpc_id(id,zombie.global_position+Vector3.UP,Vector3.ZERO,zombie.skeleton.find_bone("mixamorig_Hips"))
