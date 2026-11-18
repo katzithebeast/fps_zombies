@@ -789,6 +789,8 @@ func pose(dt: float, swimming: bool) -> void:
 	var left_blend:=0.0
 	var left_reload:=Vector3.ZERO
 	var wrist_turn:=0.0
+	var insp_relax:=0.0
+	var mag_check:=0.0       # kontrola nábojů: levá ruka drží vysunutý zásobník (úchop "mag")
 	if reloading and kind=="mag":
 		r_roll=_key(phase,[[0.0,0.0],[0.1,0.42],[0.66,0.42],[0.74,-0.3],[0.9,-0.3],[1.0,0.0]])
 		r_pitch=_key(phase,[[0.0,0.0],[0.1,0.2],[0.6,0.22],[0.66,0.27],[0.72,0.16],[0.84,0.1],[0.87,0.16],[1.0,0.0]])
@@ -862,25 +864,31 @@ func pose(dt: float, swimming: bool) -> void:
 		# Kontrola nábojů: zásobník ven a natočit k oku, u dvojky zlomit hlavně.
 		var k:=smoothstep(0.0,1.0,inspect)
 		if kind=="break":
-			barrel_angle=0.8*k
-			r_pitch=0.12*k
-			r_roll=0.35*k
-			r_move=Vector3(0.12,0.1,0.02)*k
+			# levá ruka drží předpažbí a hlavně jen sklopí; závěr se zvedne k oku (paže zůstane pod zbraní)
+			barrel_angle=0.6*k
+			r_pitch=0.25*k
+			r_roll=0.2*k
+			r_move=Vector3(0.04,0.08,0.0)*k
 		else:
 			# Zbraň se nakloní bokem k oku a zásobník povyjede ven.
 			var pistol: bool=kind=="pistol"
 			r_roll=(0.65 if pistol else 0.95)*k
 			r_pitch=0.12*k
 			r_move=(Vector3(-0.03,0.1,-0.06) if pistol else Vector3(0.1,0.09,0.0))*k
-			mag_shift=Vector3(0,-0.07 if not pistol else -0.13,0)*k
-			left_blend=k
-			left_reload=(_gi().mag_hand as Vector3)+mag_shift
+			mag_shift=Vector3(0,-0.07 if not pistol else -0.05,0)*k
+			if pistol:
+				# pistole: levá ruka pustí a uvolněně klesne (jako při prohlídce), zásobník jen povyjede
+				insp_relax=k
+			else:
+				left_blend=k
+				left_reload=(_gi().mag_hand as Vector3)+mag_shift
+				mag_check=k
 	# Prohlídka zbraně (držené N): zvednout, ukázat jeden bok, přetočit na druhý, hlaveň nahoru.
 	var ex: Array=_examine(dt,reloading)
 	var ex_move: Vector3=ex[0]
 	var ex_rot: Vector3=ex[1]
 	var ex_w: float=ex[2]
-	var ex_off: float=ex[3]
+	var ex_off: float=maxf(ex[3],insp_relax)
 	r_move+=ex_move
 	r_pitch+=ex_rot.x
 	r_roll+=ex_rot.z
@@ -1059,6 +1067,15 @@ func pose(dt: float, swimming: bool) -> void:
 			if pn: lw=pn.transform*pr.affine_inverse()*lw
 		var reload_basis:=left_basis
 		var reload_wrist:=full.transform*((_gi().left as Vector3).lerp(left_reload,left_blend))-reload_basis.orthonormalized()*_raw_grip_offset(10)
+		if mag_check>0.0 and (grip_solver.SOCKETS[gun] as Dictionary).has("mag"):
+			# úchop zásobníku spočítaný stejně jako držení (dlaň na boku, prsty kolem přední hrany),
+			# jede se zásobníkem, jak povyjíždí ven
+			var mw: Transform3D=grip_solver.wrist(gun,"Left",[],"mag")
+			var mn:=_part(full,"Magazine")
+			var mr: Transform3D=(grip_solver.part_rest.get(gun,{}) as Dictionary).get("magazine",Transform3D())
+			if mn: mw=mn.transform*mr.affine_inverse()*mw
+			reload_wrist=full.transform*mw.origin
+			reload_basis=gun_basis*mw.basis
 		var support_basis:=gun_basis*lw.basis
 		# cesta mezi úchopem a zásobníkem / závěrem vede obloukem pod zbraní, ne skrz ni
 		var sg: Vector3=lw.origin

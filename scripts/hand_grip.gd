@@ -17,10 +17,13 @@ const S:=0.86
 const SOCKETS:={
 	"ak":{"trigger":Vector3(0,0.045,-0.041),
 		"right":{"a0":Vector3(0,0.05,0.005),"a1":Vector3(0,-0.025,0.035),"n":Vector3.LEFT,"knuckle":Vector3(0.026,0.053,-0.006)},
-		"left":{"a0":Vector3(0,0.09,-0.39),"a1":Vector3(0,0.09,-0.23),"n":Vector3.UP,"knuckle_dir":Vector3(0.55,-0.83,0),"at":0.075}},
+		"left":{"a0":Vector3(0,0.09,-0.39),"a1":Vector3(0,0.09,-0.23),"n":Vector3.UP,"knuckle_dir":Vector3(0.55,-0.83,0),"at":0.075},
+		# kontrola nábojů: levá ruka obejme vysunutý zásobník zleva, prsty kolem jeho přední hrany
+		"mag":{"a0":Vector3(0,-0.02,-0.15),"a1":Vector3(0,-0.12,-0.2),"n":Vector3.RIGHT,"knuckle_dir":Vector3(-0.6,0,-0.8),"at":0.035,"part":"magazine"}},
 	"mp40":{"trigger":Vector3(0,0.009,-0.06),
 		"right":{"a0":Vector3(0,0.01,-0.008),"a1":Vector3(0,-0.06,0.03),"n":Vector3.LEFT,"knuckle":Vector3(0.025,0.019,-0.02)},
-		"left":{"a0":Vector3(0,0.03,-0.317),"a1":Vector3(0,-0.13,-0.317),"n":Vector3.RIGHT,"knuckle_dir":Vector3(-0.6,0,-0.8),"at":0.04}},
+		"left":{"a0":Vector3(0,0.03,-0.317),"a1":Vector3(0,-0.13,-0.317),"n":Vector3.RIGHT,"knuckle_dir":Vector3(-0.6,0,-0.8),"at":0.04},
+		"mag":{"a0":Vector3(0,-0.02,-0.317),"a1":Vector3(0,-0.17,-0.317),"n":Vector3.RIGHT,"knuckle_dir":Vector3(-0.6,0,-0.8),"at":0.05,"part":"magazine"}},
 	"deagle":{"trigger":Vector3(0,0.036,-0.094),
 		"right":{"a0":Vector3(0,0.04,-0.04),"a1":Vector3(0,-0.035,-0.031),"n":Vector3.LEFT,"knuckle":Vector3(0.026,0.042,-0.06)},
 		"left":{"a0":Vector3(0,0.04,-0.04),"a1":Vector3(0,-0.035,-0.031),"n":Vector3.RIGHT,"knuckle":Vector3(-0.032,0.006,-0.09),"free":0.015}},
@@ -121,10 +124,10 @@ static func dist(s, p: Vector3, xf: Dictionary, extra: Array=[]) -> float:
 ## Dlaň leží na povrchu zbraně, kořen ukazováku co nejblíž cíli (u pravé ruky za spouští, u levé
 ## na hraně předpažbí / přes prsty pravé ruky), zápěstí ani klouby nesmí do zbraně. Hledá se natočení
 ## ruky kolem osy úchopu a malé posunutí cíle kořene (socket "free", metry).
-func wrist(gun: String, side: String, extra: Array=[]) -> Transform3D:
-	var key:=gun+":"+side
+func wrist(gun: String, side: String, extra: Array=[], sock_name:="") -> Transform3D:
+	var key:=gun+":"+side+sock_name
 	if _wrist_cache.has(key) and extra.is_empty(): return _wrist_cache[key]
-	var sock: Dictionary=SOCKETS[gun]["right" if side=="Right" else "left"]
+	var sock: Dictionary=SOCKETS[gun][sock_name if sock_name!="" else ("right" if side=="Right" else "left")]
 	var h:=hand(side)
 	var rest: Dictionary=part_rest.get(gun,{})
 	var a0: Vector3=sock.a0

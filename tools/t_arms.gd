@@ -5,6 +5,7 @@ var player: Player
 func _initialize() -> void: call_deferred("run")
 func tick(dt: float) -> void:
 	player.weapon.update(dt)
+	if OS.get_environment("INS")!="": player.body.weapon.inspect=float(OS.get_environment("INS"))
 	player.body.update_body(dt,Vector3.ZERO,0,Vector3.ZERO,false,false,true)
 func shot(name: String) -> void:
 	await RenderingServer.frame_post_draw
