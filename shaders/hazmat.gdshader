@@ -12,7 +12,6 @@ uniform sampler2D wear_tex : hint_default_black, filter_linear_mipmap_anisotropi
 uniform sampler2D zones_tex : hint_default_black, filter_linear_mipmap;
 uniform sampler2D detail_tex : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D grime_tex : hint_default_black, filter_linear_mipmap, repeat_enable;
-uniform sampler2D pos_tex : hint_default_black, filter_linear;   // klidová poloha (vzory bez švů)
 // --- přizpůsobení hráče (menu Customize); výchozí = původní barvy modelu
 instance uniform vec4 suit_col : source_color = vec4(0.352, 0.552, 0.948, 1.0);
 instance uniform vec4 rubber_col : source_color = vec4(0.209, 0.209, 0.209, 1.0);
@@ -34,15 +33,15 @@ uniform float wet = 0.0;                 // celkové navlhnutí (déšť, sprcha
 instance uniform float wet_line = -100.0;  // světová výška, kam je oblek mokrý (ponoření)
 varying vec3 world_pos;
 varying vec3 world_n;
+varying vec3 rest_pos;   // klidová poloha vrcholu (CUSTOM0, tools/bake_rest_pos.gd): vzory drží na obleku bez švů
 void vertex() {
+	rest_pos = CUSTOM0.xyz;
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_n = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
 const vec3 SUIT_REF = vec3(0.352, 0.552, 0.948);   // průměrné barvy zón v textuře (sRGB)
 const vec3 RUBBER_REF = vec3(0.209, 0.209, 0.209);
 const vec3 VISOR_REF = vec3(0.863, 0.688, 0.19);
-const vec3 BOX_MIN = vec3(-0.85, -0.1, -0.2);
-const vec3 BOX_SIZE = vec3(1.7, 2.2, 0.5);
 float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
 float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
@@ -52,13 +51,18 @@ float vnoise(vec3 x) {
 		mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x), mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
 float fbm(vec3 p) { return vnoise(p) * 0.55 + vnoise(p * 2.03 + 7.1) * 0.3 + vnoise(p * 4.1 + 3.3) * 0.15; }
+// vyhlazený práh (antialiasing podle derivace v pixelu): ostré, ale nezubaté okraje
+float aas(float v, float t, float soft) { float w = fwidth(v) * 0.75 + soft + 1e-5; return smoothstep(t - w, t + w, v); }
+// tekutá deformace prostoru v čase (Pack-a-Punch styl: vzor proudí po obleku)
+vec3 warp(vec3 q, float t) {
+	vec3 w = vec3(fbm(q + vec3(0.0, t, 0.0)), fbm(q + vec3(5.2, 1.3 - t * 0.8, 2.1)), fbm(q + vec3(1.7, 9.2, t * 0.6)));
+	return q + (w - 0.5) * 1.8;
+}
 // Vzor na obleku: [síla 0..1, odstín 0..1 (0 = barva vzoru, 1 = tmavší vzor)] v klidové poloze P.
 vec2 suit_pattern(vec3 P, int kind, float sc) {
 	if (kind == 1) {          // maskáč (woodland): dvě vrstvy skvrn
-		float a = fbm(P * 3.2 * sc);
-		float b = fbm(P * 5.5 * sc + 11.0);
-		float m1 = smoothstep(0.5, 0.53, a);
-		float m2 = smoothstep(0.58, 0.61, b);
+		float m1 = aas(fbm(P * 3.2 * sc), 0.5, 0.004);
+		float m2 = aas(fbm(P * 5.5 * sc + 11.0), 0.58, 0.004);
 		return vec2(max(m1, m2), m2);
 	} else if (kind == 2) {   // digitální maskáč: pixely 2 velikostí
 		float cs = 0.035 / sc;
@@ -68,22 +72,22 @@ vec2 suit_pattern(vec3 P, int kind, float sc) {
 		float m2 = step(0.6, b);
 		return vec2(max(m1, m2), m2);
 	} else if (kind == 3) {   // výstražné šikmé pruhy
-		float s = fract((P.x * 0.8 + P.y + P.z * 0.6) * 5.0 * sc);
-		return vec2(smoothstep(0.48, 0.5, s) * (1.0 - smoothstep(0.98, 1.0, s)), 0.0);
+		float d = abs(fract((P.x * 0.8 + P.y + P.z * 0.6) * 5.0 * sc) - 0.5);
+		return vec2(1.0 - aas(d, 0.25, 0.0), 0.0);
 	} else if (kind == 4) {   // reflexní pásy: holeně, stehna, předloktí, hruď
 		float y = P.y;
-		float legs = (smoothstep(0.0, 0.01, abs(y - 0.33) - 0.03) < 0.5 || smoothstep(0.0, 0.01, abs(y - 0.5) - 0.025) < 0.5) && abs(P.x) < 0.3 ? 1.0 : 0.0;
-		float arms = (abs(abs(P.x) - 0.52) < 0.03 && y > 1.0) ? 1.0 : 0.0;
-		float chest = (abs(y - 1.3) < 0.025 && abs(P.x) < 0.25) ? 1.0 : 0.0;
+		float legs = (1.0 - aas(min(abs(y - 0.33) - 0.03, abs(y - 0.5) - 0.025), 0.0, 0.0)) * (1.0 - aas(abs(P.x), 0.3, 0.0));
+		float arms = (1.0 - aas(abs(abs(P.x) - 0.52), 0.03, 0.0)) * aas(y, 1.0, 0.0);
+		float chest = (1.0 - aas(abs(y - 1.3), 0.025, 0.0)) * (1.0 - aas(abs(P.x), 0.25, 0.0));
 		return vec2(max(legs, max(arms, chest)), 0.0);
 	} else if (kind == 5) {   // cákance barvy
 		float a = fbm(P * 7.0 * sc + 2.0);
 		float d = vnoise(P * 60.0 * sc);
-		return vec2(max(smoothstep(0.66, 0.68, a), step(0.93, d) * step(0.45, a)), 0.0);
+		return vec2(max(aas(a, 0.66, 0.003), aas(d, 0.93, 0.0) * aas(a, 0.45, 0.0)), 0.0);
 	} else if (kind == 6) {   // tygří pruhy
 		float w = fbm(P * 4.0 * sc) * 2.5;
 		float s = sin((P.y * 22.0 + abs(P.x) * 6.0) * sc + w * 3.0);
-		return vec2(smoothstep(0.55, 0.62, s), 0.0);
+		return vec2(aas(s, 0.58, 0.02), 0.0);
 	}
 	return vec2(0.0);
 }
@@ -107,7 +111,7 @@ void fragment() {
 	base = mix(base, suit_col.rgb * lum(base) / lum(lin(SUIT_REF)), suit);
 	base = mix(base, rubber_col.rgb * lum(base) / lum(lin(RUBBER_REF)), rubber);
 	base = mix(base, visor_col.rgb * lum(base) / lum(lin(VISOR_REF)), visor);
-	vec3 P = BOX_MIN + texture(pos_tex, UV).rgb * BOX_SIZE;
+	vec3 P = rest_pos;
 	vec2 pat = suit_pattern(P, int(pattern + 0.5), max(pattern_scale, 0.2)) * suit;
 	vec3 pcol = mix(pattern_col.rgb, pattern_col.rgb * 0.45, pat.y) * lum(texture(albedo_tex, UV).rgb) / lum(lin(SUIT_REF));
 	base = mix(base, pcol, pat.x);
@@ -128,32 +132,59 @@ void fragment() {
 	if (prest > 0.0) {
 		float shade = clamp(lum(texture(albedo_tex, UV).rgb) / lum(lin(SUIT_REF)), 0.4, 1.4);
 		float sc = max(pattern_scale, 0.2);
+		float t = TIME;
+		float facing = clamp(dot(normalize(VIEW), NORMAL), 0.0, 1.0);
 		float brushed = vnoise(P * vec3(5.0, 140.0, 5.0));
-		float camo = smoothstep(0.5, 0.53, fbm(P * 3.2 * sc));
-		float camo2 = smoothstep(0.58, 0.61, fbm(P * 5.5 * sc + 11.0));
-		if (pk == 7) {            // zlato: kartáčovaný kov
-			p_alb = vec3(1.0, 0.71, 0.29); p_metal = 1.0; p_rough = 0.14 + brushed * 0.12;
-		} else if (pk == 8) {     // platina
-			p_alb = vec3(0.8, 0.8, 0.82); p_metal = 1.0; p_rough = 0.08 + brushed * 0.1;
-		} else if (pk == 9) {     // diamant: broušené plošky, duhový lom, jiskry
+		// světelný pruh, který každé ~3 s přejede oblek zdola nahoru
+		float sweep_y = fract(t * 0.3) * 3.2 - 0.6;
+		float sweep = exp(-pow((P.y * 0.9 + P.x * 0.35 - sweep_y) * 8.0, 2.0));
+		if (pk == 7) {            // zlato: tekuté zlato proudí po kartáčovaném kovu
+			float f = fbm(warp(P * 2.6 * sc, t * 0.35));
+			p_alb = mix(vec3(0.72, 0.42, 0.1), vec3(1.0, 0.84, 0.46), smoothstep(0.3, 0.75, f));
+			p_metal = 1.0; p_rough = 0.08 + 0.14 * (1.0 - f) + brushed * 0.06;
+			p_emit = vec3(1.0, 0.72, 0.3) * (sweep * 1.1 + pow(f, 6.0) * 0.6);
+		} else if (pk == 8) {     // platina: chrom s duhovým olejovým filmem, který se přelévá
+			float f = fbm(warp(P * 2.2 * sc, t * 0.3));
+			vec3 irid = 0.5 + 0.5 * cos(6.2832 * (f * 1.6 + facing * 0.7 + t * 0.12 + vec3(0.0, 0.33, 0.67)));
+			p_alb = mix(vec3(0.82, 0.83, 0.86), irid, 0.35 * smoothstep(0.35, 0.7, f));
+			p_metal = 1.0; p_rough = 0.05 + brushed * 0.06;
+			p_emit = vec3(0.9, 0.95, 1.0) * sweep * 1.5 + irid * pow(f, 4.0) * 0.35;
+		} else if (pk == 9) {     // diamant: broušené plošky, lom duhy se točí, jiskry
 			vec3 cell = floor(P * 24.0 * sc);
 			float hcell = hash3(cell);
-			float facing = dot(normalize(VIEW), NORMAL);
-			vec3 prism = 0.6 + 0.4 * cos(6.2832 * (hcell + facing * 0.9 + vec3(0.0, 0.33, 0.67)));
-			p_alb = mix(vec3(0.93, 0.96, 1.0), prism, 0.5); p_metal = 0.85; p_rough = 0.025 + hcell * 0.03;
-			p_emit = vec3(2.5) * step(0.992, hash3(cell + floor(TIME * 4.0)));
-		} else if (pk == 10) {    // obsidián: černé sklo, fialové žilky pulzují
-			p_alb = mix(vec3(0.015), vec3(0.05, 0.04, 0.07), max(camo, camo2)); p_metal = 0.4; p_rough = 0.06;
-			float vein = 1.0 - smoothstep(0.0, 0.018, abs(fbm(P * 5.0 * sc + 3.0) - 0.5));
-			p_emit = vec3(0.55, 0.15, 1.0) * vein * (1.2 + 0.8 * sin(TIME * 2.0 + P.y * 9.0));
-		} else if (pk == 11) {    // krvavý měsíc: rudá metalíza s maskáčem a třpytem
-			p_alb = mix(vec3(0.42, 0.015, 0.02), vec3(0.05, 0.0, 0.005), max(camo, camo2 * 0.7)); p_metal = 0.75;
-			p_rough = 0.2 + 0.15 * step(0.7, hash3(floor(P * 300.0)));
-		} else {                  // láva: tmavá struska, žhavé praskliny
-			p_alb = mix(vec3(0.05, 0.04, 0.035), vec3(0.13, 0.08, 0.06), camo); p_metal = 0.0; p_rough = 0.75;
-			float crack = 1.0 - smoothstep(0.0, 0.025, abs(fbm(P * 4.0 * sc + 9.0) - 0.5));
-			p_emit = vec3(3.0, 0.75, 0.08) * crack * (0.75 + 0.25 * sin(TIME * 1.7 + P.x * 7.0 + P.y * 5.0));
-			p_alb = mix(p_alb, vec3(0.6, 0.12, 0.02), crack * 0.6);
+			vec3 prism = 0.6 + 0.4 * cos(6.2832 * (hcell + facing * 0.9 + t * 0.18 + vec3(0.0, 0.33, 0.67)));
+			p_alb = mix(vec3(0.93, 0.96, 1.0), prism, 0.55); p_metal = 0.85; p_rough = 0.025 + hcell * 0.03;
+			float tw = pow(max(sin(t * 2.6 + hcell * 43.0), 0.0), 40.0) * step(0.8, hash3(cell + 3.7));
+			p_emit = vec3(3.0) * tw + prism * sweep * 1.6;
+		} else if (pk == 10) {    // obsidián: černé sklo, fialová energie teče žilkami
+			vec3 q = warp(P * 4.0 * sc, t * 0.2);
+			float v = fbm(q);
+			p_alb = mix(vec3(0.012), vec3(0.05, 0.035, 0.08), smoothstep(0.4, 0.7, v)); p_metal = 0.4; p_rough = 0.05;
+			float vein = 1.0 - aas(abs(v - 0.5), 0.02, 0.01);
+			float halo = 1.0 - smoothstep(0.0, 0.09, abs(v - 0.5));
+			float pulse = pow(0.5 + 0.5 * sin(P.y * 14.0 - t * 4.0 + v * 12.0), 3.0);
+			p_emit = vec3(0.55, 0.15, 1.0) * (vein * (0.5 + 2.2 * pulse) + halo * 0.25) + vec3(0.4, 0.2, 0.9) * sweep * 0.6;
+		} else if (pk == 11) {    // krvavý měsíc: maskáč se pomalu přelévá, okraje skvrn rudě žhnou
+			float a = fbm(P * 3.2 * sc + vec3(0.0, 0.0, t * 0.12));
+			float b = fbm(P * 5.5 * sc + 11.0 - vec3(t * 0.09, 0.0, 0.0));
+			float camo = max(aas(a, 0.5, 0.004), aas(b, 0.58, 0.004) * 0.7);
+			p_alb = mix(vec3(0.42, 0.015, 0.02), vec3(0.05, 0.0, 0.005), camo); p_metal = 0.75;
+			vec3 fc = floor(P * 300.0);
+			p_rough = 0.2 + 0.15 * step(0.7, hash3(fc));
+			float rim = (1.0 - aas(abs(a - 0.5), 0.012, 0.004)) + (1.0 - aas(abs(b - 0.58), 0.012, 0.004)) * 0.7;
+			float flake = step(0.985, hash3(fc + floor(t * 5.0 + hash3(fc) * 5.0)));
+			p_emit = vec3(1.6, 0.05, 0.03) * rim * (0.7 + 0.5 * sin(t * 2.5 + P.y * 6.0)) + vec3(2.0, 0.3, 0.25) * flake + vec3(1.0, 0.1, 0.08) * sweep * 0.35;
+		} else {                  // láva: struska praská, magma proudí vzhůru a žhne
+			vec3 q = warp(P * 3.5 * sc - vec3(0.0, t * 0.25, 0.0), t * 0.15);
+			float v = fbm(q);
+			float heat = fbm(q * 2.0 + vec3(0.0, -t * 0.8, 0.0));
+			float crack = 1.0 - aas(abs(v - 0.5), 0.035, 0.012);
+			float glow = 1.0 - smoothstep(0.0, 0.08, abs(v - 0.5));
+			p_alb = mix(vec3(0.05, 0.04, 0.035), vec3(0.12, 0.075, 0.055), smoothstep(0.3, 0.7, heat)); p_metal = 0.0; p_rough = 0.8;
+			p_alb = mix(p_alb, vec3(0.45, 0.08, 0.015), crack * 0.6);
+			vec3 hot = mix(vec3(1.7, 0.28, 0.02), vec3(2.8, 1.05, 0.18), heat * heat);
+			p_emit = hot * (crack * (0.55 + 0.6 * heat) + glow * 0.18 * (0.6 + 0.4 * sin(t * 3.0 + heat * 9.0)));
+			p_rough = mix(p_rough, 0.35, crack);
 		}
 		p_alb *= mix(1.0, shade, 0.5);
 		base = mix(base, p_alb, prest);
