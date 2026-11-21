@@ -17,7 +17,7 @@ const S:=0.86
 const SOCKETS:={
 	"ak":{"trigger":Vector3(0,0.045,-0.041),
 		"right":{"a0":Vector3(0,0.05,0.005),"a1":Vector3(0,-0.025,0.035),"n":Vector3.LEFT,"knuckle":Vector3(0.026,0.053,-0.006)},
-		"left":{"a0":Vector3(0,0.09,-0.39),"a1":Vector3(0,0.09,-0.23),"n":Vector3.UP,"knuckle_dir":Vector3(0.55,-0.83,0),"at":0.075},
+		"left":{"a0":Vector3(0,0.09,-0.39),"a1":Vector3(0,0.09,-0.23),"n":Vector3.UP,"knuckle_dir":Vector3(0.55,-0.83,0),"at":0.075,"row_yaw":0.3},
 		# kontrola nábojů: levá ruka obejme vysunutý zásobník zleva, prsty kolem jeho přední hrany
 		"mag":{"a0":Vector3(0,-0.02,-0.15),"a1":Vector3(0,-0.12,-0.2),"n":Vector3.RIGHT,"knuckle_dir":Vector3(-0.6,0,-0.8),"at":0.035,"part":"magazine"}},
 	"mp40":{"trigger":Vector3(0,0.009,-0.06),
@@ -29,7 +29,7 @@ const SOCKETS:={
 		"left":{"a0":Vector3(0,0.04,-0.04),"a1":Vector3(0,-0.035,-0.031),"n":Vector3.RIGHT,"knuckle":Vector3(-0.032,0.006,-0.09),"free":0.015}},
 	"izh54":{"trigger":Vector3(0,0.024,-0.09),
 		"right":{"a0":Vector3(0,0.035,0.01),"a1":Vector3(0,-0.03,0.065),"n":Vector3.LEFT,"knuckle":Vector3(0.026,0.036,-0.045)},
-		"left":{"a0":Vector3(0,0.062,-0.43),"a1":Vector3(0,0.062,-0.24),"n":Vector3.UP,"knuckle_dir":Vector3(0.55,-0.83,0),"at":0.1,"part":"barrel"}},
+		"left":{"a0":Vector3(0,0.062,-0.43),"a1":Vector3(0,0.062,-0.24),"n":Vector3.UP,"knuckle_dir":Vector3(0.55,-0.83,0),"at":0.1,"part":"barrel","row_yaw":0.7}},
 }
 const FINGERS:=["Thumb","Index","Middle","Ring","Pinky"]
 # rozsah ohybu článků [min, max] (rad)
@@ -139,8 +139,11 @@ func wrist(gun: String, side: String, extra: Array=[], sock_name:="") -> Transfo
 		var kd: Vector3=sock.knuckle_dir
 		K0=surface(gun,a0+a*float(sock.at),kd.normalized(),rest,extra)+kd.normalized()*0.012
 	var free: float=sock.get("free",0.004 if side=="Right" else 0.02)
+	# row_yaw: řada kloubů šikmo k ose předpažbí (podpěrná ruka zespodu: dlaň pod předpažbím,
+	# ruka i předloktí míří šikmo dopředu – zápěstí zůstane rovné a předloktí přijde zleva zdola)
+	var a_row: Vector3=a if not sock.has("row_yaw") else (Basis(Vector3.UP,float(sock.row_yaw))*a).normalized()
 	var base_n: Vector3=sock.n
-	base_n=(base_n-a*base_n.dot(a)).normalized()
+	base_n=(base_n-a_row*base_n.dot(a_row)).normalized()
 	var sdf_s=sdf(gun)
 	var hk: Vector3=h.k
 	var hn: Vector3=h.n
@@ -168,8 +171,8 @@ func wrist(gun: String, side: String, extra: Array=[], sock_name:="") -> Transfo
 		return bestd
 	# cena polohy: [cena, Transform3D, složky]
 	var place:=func(th: float, d: Vector3) -> Array:
-		var nt:=Basis(a,th)*base_n
-		var R:=frame(a,nt)*hand_frame
+		var nt:=Basis(a_row,th)*base_n
+		var R:=frame(a_row,nt)*hand_frame
 		var K:=K0+d
 		var w: Vector3=K-R*i1
 		var palm: Vector3=w+R*palm_l
@@ -379,6 +382,24 @@ func thumb(gun: String, hand_xf: Transform3D, to_gun: Transform3D, ch: Dictionar
 	# přirozená opozice (souřadnice ruky, jednotky kostry): u ukazováku, nad dlaní, vpředu
 	var pref: Vector3=(k*-6.0+n*3.5+f*4.5)/86.0
 	var inv:=hand_xf.affine_inverse()
+	var pref_w:=0.15
+	var curl_w:=0.0
+	# podpěrná ruka zespodu (row_yaw): palec leží podél boku předpažbí a míří dopředu, ne obloukem do vzduchu
+	var sock: Dictionary=(SOCKETS.get(gun,{}) as Dictionary).get("left",{}) if side=="Left" else {}
+	if sock.has("row_yaw"):
+		var root_g: Vector3=to_gun*(fk(hand_xf,ch,[0.0,0.0,0.0],0.0)[0] as Transform3D).origin
+		var pm:=Transform3D()
+		if sock.has("part") and xf.has(sock.part):
+			pm=(xf[sock.part] as Transform3D)*((part_rest.get(gun,{}) as Dictionary).get(sock.part,Transform3D()) as Transform3D).affine_inverse()
+		var a0g: Vector3=pm*(sock.a0 as Vector3)
+		var fwd: Vector3=(pm.basis*((sock.a0 as Vector3)-(sock.a1 as Vector3))).normalized()
+		var on_axis:=a0g+fwd*(root_g-a0g).dot(fwd)
+		var out:=root_g-on_axis
+		out=(out-fwd*out.dot(fwd)).normalized()
+		var p_g:=surface(gun,on_axis+fwd*0.04,out,xf,extra)+out*finger_r*1.3     # na povrchu boku, kousek před kořenem palce
+		pref=inv*(to_gun.affine_inverse()*p_g)
+		pref_w=0.45
+		curl_w=0.03           # palec spíš natažený podél boku než stočený do háčku
 	var cost:=func(c: Array, sa: float) -> float:
 		var pts:=fk(hand_xf,ch,c,sa)
 		var pen:=0.0
@@ -391,7 +412,7 @@ func thumb(gun: String, hand_xf: Transform3D, to_gun: Transform3D, ch: Dictionar
 				if d<r: pen+=r-d
 				if j==2: touch=minf(touch,d)
 		var tip: Vector3=inv*((pts[2] as Transform3D)*(ch.tip as Vector3))
-		return pen*30.0+absf(touch-r)*1.0+tip.distance_to(pref)*S*0.15+absf(sa)*0.004
+		return pen*30.0+absf(touch-r)*1.0+tip.distance_to(pref)*S*pref_w+absf(sa)*0.004+(absf(float(c[1]))+absf(float(c[2])))*curl_w
 	var best:=[INF,[0.0,0.0,0.0],0.0]
 	var step:=0.12
 	var iters:=4

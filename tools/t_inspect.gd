@@ -44,8 +44,13 @@ func run() -> void:
 			var le: Vector3=fs.global_transform*fs.get_bone_global_pose(fs.find_bone("mixamorig_LeftForeArm")).origin
 			var mb: Basis=rig.avatar.model.global_transform.basis.orthonormalized()
 			cam.fov=45
-			for v in [["a",Vector3(0.45,0.15,0.35)],["b",Vector3(0.1,-0.45,0.3)],["c",Vector3(-0.3,0.2,0.4)]]:
-				var c:=(lw+le)*0.5
+			var c0:=(lw+le)*0.5
+			var views:=[["a",Vector3(0.45,0.15,0.35)],["b",Vector3(0.1,-0.45,0.3)],["c",Vector3(-0.3,0.2,0.4)]]
+			if OS.get_environment("HANDVIEW")!="":
+				views=[["L",Vector3(0.35,0.05,0.05)],["U",Vector3(0.05,-0.35,0.05)],["T",Vector3(0.02,0.35,0.08)],["R",Vector3(-0.35,0.05,0.05)]]
+				c0=lw
+			for v in views:
+				var c:=c0
 				cam.global_position=c+mb*(v[1] as Vector3)
 				cam.look_at(c,Vector3.UP)
 				await shot("/tmp/ins_%s%s_%d_%s.png"%[gun,tag,int(lv*100),v[0]])

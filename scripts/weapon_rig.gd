@@ -15,7 +15,7 @@ const GUNS:={
 		"reload":"pistol","reload_time":1.8,"shell":Vector3(0.02,0.09,-0.02),"flash":1.2},
 	"izh54":{"rsnd":"izh_reload.wav","scene":"res://assets/izh54/izh54.tscn","muzzle":Vector3(0,0.07,-0.9),"left":Vector3(-0.025,0.03,-0.33),
 		"handle":Vector3(0,0.06,-0.15),"mag_hand":Vector3(-0.02,0.02,-0.12),"hip":Vector3(-0.20,-0.20,0.26),"aim_y":-0.053,
-		"reload":"break","reload_time":2.6,"ads_pull":0.012,"shell":Vector3.ZERO,"flash":1.6},
+		"reload":"break","reload_time":2.6,"ads_pull":0.012,"ads_slack":0.07,"shell":Vector3.ZERO,"flash":1.6},
 }
 # Předměty, které se drží v ruce místo zbraně (stejný systém úchopu, houpání a IK).
 const ITEM_POSES:={
@@ -110,6 +110,8 @@ var holster:=0.0             # 0 držení, 1 zbraň schovaná pod obrazem
 var muzzle:=Vector3(0,0.09,-0.66)
 var handle:=Vector3(0.045,0.075,-0.02)
 var hip_pose:=Vector3(-0.15,-0.235,0.30)
+const SHOULDER_SHIFT_MAX:=0.2    # vlastní pohled: o kolik se smí rameno posunout kvůli rovnému zápěstí
+const WRIST_KEEP:=0.2            # kolik z původního ohybu zápěstí zůstane (přirozený mírný ohyb)
 var CLAV_L_TP:=Vector3(0,-0.04,0.13)      # levé rameno se k podpěře předsune
 var CLAV_L_FP:=Vector3(0.08,-0.04,0.20)
 var CLAV_R_TP:=Vector3(0.0,-0.08,-0.08)     # kam míří pravá klíční kost (3. osoba)
@@ -118,7 +120,8 @@ var ELBOW_AUTO:=1.0        # jak moc loket sleduje rovné zápěstí (0 = jen za
 var FOREARM_TWIST:=0.75    # podíl otočení dlaně, který nese předloktí místo zápěstí
 var UPPER_TWIST:=0.4       # u natažené paže nese část otočení i rameno
 var _hand_axis:={}           # kost ruky → směr ke kořeni prostředníčku v souřadnicích ruky (klid)
-const ADS_PULL:=0.06        # při míření se oko vzdálí od mířidel (jinak pouzdro závěru zakryje půl obrazu)
+const ADS_ELBOW_SLACK:=0.03   # vlastní pohled, míření: pravá paže nezůstane natažená na doraz (loket ~50°)
+const ADS_PULL:=0.075        # při míření se oko vzdálí od mířidel (jinak pouzdro závěru zakryje půl obrazu)
 const HIP_YAW:=0.05
 const HIP_ROLL:=-0.09
 const SPRINT_MOVE:=Vector3(0.0,0.05,-0.02)
@@ -1384,13 +1387,14 @@ func pose_first_person() -> void:
 	aim_bone(19,20,bone_pose(19).origin+lift*CLAV_R_FP)
 	var right_target:=_right_grip+correction
 	var left_target:=_left_grip+correction
+	# Rameno dorovná dosah tak, aby zápěstí zůstalo rovné (jinak natažená paže láme ruku v zápěstí).
 	# Vlastní kostra má posunutá ramena. Její dosah se musí vyřešit zvlášť:
 	# jinak levá dlaň při chůzi visela i 15 cm za předpažbím.
 	for attempt in 4:
 		for arm in [[20,21,22],[8,9,10]]:
 			var grip: Vector3=right_target if arm[0]==20 else left_target
 			var start:=bone_pose(arm[0]).origin
-			var reach:=start.distance_to(bone_pose(arm[1]).origin)+bone_pose(arm[1]).origin.distance_to(bone_pose(arm[2]).origin)-0.012
+			var reach:=start.distance_to(bone_pose(arm[1]).origin)+bone_pose(arm[1]).origin.distance_to(bone_pose(arm[2]).origin)-0.012-(float(_gi().get("ads_slack",ADS_ELBOW_SLACK))*aim if arm[0]==20 else 0.0)
 			var delta: Vector3=start+(grip-start).limit_length(reach)-grip
 			if aim>0.0 and not delta.is_zero_approx():
 				# Přes mířidla se smí zbraň přiblížit jen podél osy pohledu,
@@ -1404,6 +1408,12 @@ func pose_first_person() -> void:
 			first.position+=delta
 			right_target+=delta
 			left_target+=delta
+	# Levé rameno (mimo záběr) se přisune tak, aby podpěrná ruka měla rovné zápěstí; až po vyřešení
+	# dosahu, takže poloha zbraně v záběru zůstane stejná. Pravá ruka drží pistolovou rukojeť
+	# s přirozeným ohybem zápěstí – tu nechat.
+	for it in 2:
+		# při přebíjení / kontrole ruka pracuje jinde – dráhy jsou laděné bez posunu ramene
+		_shoulder_reach(8,9,10,left_target,_left_basis,1.0-smoothstep(0.0,0.6,_left_free))
 	solve_arm(20,21,22,right_target,swing*Vector3(-0.7,head.y-0.5,-0.1),_right_basis)
 	solve_arm(8,9,10,left_target,swing*Vector3(0.6,head.y-0.5,0.15),_left_basis)
 	first_right_error=bone_pose(22).origin.distance_to(right_target-_right_basis.orthonormalized()*grip_offset(22))*0.86
@@ -1450,6 +1460,35 @@ func _raw_grip_offset(hand: int) -> Vector3:
 	var sk: Skeleton3D=avatar.skeleton
 	var key:="grip_offset_Left" if hand==10 else "grip_offset_Right"
 	return sk.get_meta(key,Vector3.ZERO)
+
+## Vlastní pohled: ramena jsou mimo záběr, takže se smí posunout tam, kde paže dosáhne na úchop
+## s přirozeným zápěstím. Ideální loket leží v prodloužení ruky (úchop − osa ruky × délka předloktí,
+## s malým zbytkem ohybu); rameno se přisune / oddálí tak, aby od něj byl loket přesně na délku
+## nadloktí. Bez toho byla levá paže natažená na doraz a ruka se v zápěstí lámala o 50–90°.
+func _shoulder_reach(upper: int, lower: int, hand: int, target: Vector3, hand_basis: Basis, w: float) -> void:
+	if w<0.01: return
+	var sk: Skeleton3D=pose_skeleton()
+	if not _hand_axis.has(hand):
+		var mid:=-1
+		for c in sk.get_bone_children(hand):
+			if "Middle" in sk.get_bone_name(c): mid=c
+		_hand_axis[hand]=sk.get_bone_rest(mid).origin.normalized() if mid>=0 else Vector3.UP
+	var hb:=hand_basis.orthonormalized()
+	var t:=target-hb*grip_offset(hand)
+	var s:=bone_pose(upper).origin
+	var e_now:=bone_pose(lower).origin
+	var a:=s.distance_to(e_now)
+	var b:=e_now.distance_to(bone_pose(hand).origin)
+	var straight:=(hb*(_hand_axis[hand] as Vector3)).normalized()
+	var now_dir:=(t-e_now).normalized()
+	var fdir:=straight.slerp(now_dir,WRIST_KEEP) if now_dir.dot(straight)>-0.9 else straight
+	var e_star:=t-fdir*b
+	var s_star:=e_star+(s-e_star).normalized()*a
+	var move:=(s_star-s).limit_length(SHOULDER_SHIFT_MAX)*w
+	if move.length()<0.002: return
+	var parent:=sk.get_bone_parent(upper)
+	var local:=bone_pose(parent).affine_inverse()*(s+move)
+	sk.set_bone_pose_position(upper,local)
 
 func solve_arm(upper: int, lower: int, hand: int, target: Vector3, pole: Vector3, hand_basis: Basis) -> void:
 	var sk: Skeleton3D=pose_skeleton()
