@@ -165,6 +165,7 @@ func _ready() -> void:
 	_check(t, "VHS kamera  (klávesa V)", "vhs")
 	_check(t, "Rybí oko  (klávesa G)", "fisheye")
 	_check(t, "Bodycam – EXPERIMENT  (klávesa B)", "bodycam")      # BODYCAM (experiment)
+	_slider(t, "Bodycam – rozmazání pohybem (0 = vypnuto)", "bodycam_blur", 0.0, 2.0, 0.05, "%.2f×")      # BODYCAM (experiment)
 	_check(t, "Zaměřovač", "crosshair_on")
 	_check(t, "Hitmarker při zásahu (křížek)", "hitmarker")
 	_check(t, "Zvuk zásahu", "hit_sound")

@@ -85,7 +85,7 @@ var settings := {
 	"preset": 2, "gi": true, "ssr": true, "planar": 1, "volumetric": true, "dust": true, "shadows": 3, "ao": true,
 	"bloom": 0.3, "dof": true, "grain": 0.35, "vignette": 0.5,
 	"mouse": 1.0, "bob": 1.0, "gun_sway": 1.0, "aim_sway": 0.1, "shake": 1.0, "vhs": false, "fisheye": false, "volume": 0.8, "music": 0.35, "flash_size": 30.0, "flash_flicker": true, "horror": false, "intro": true, "mini_range": 20.0, "mini_size": 300.0, "mini_pos": 0, "mini_line": 2, "mini_margin": 110.0, "recoil": 1.0, "gun_master": 0.0, "gun_bass": 0.0, "gun_echo": 1.0, "gun_ak_vol": 0.0, "gun_ak_bass": 0.0, "gun_ak_echo": 0.35, "gun_ak_pitch": 1.0, "gun_mp40_vol": 0.0, "gun_mp40_bass": 0.0, "gun_mp40_echo": 0.35, "gun_mp40_pitch": 1.0, "gun_izh54_vol": 0.0, "gun_izh54_bass": 0.0, "gun_izh54_echo": 0.35, "gun_izh54_pitch": 1.0, "gun_deagle_vol": 0.0, "gun_deagle_bass": 0.0, "gun_deagle_echo": 0.35, "gun_deagle_pitch": 1.0,
-	"fisheye_strength": 0.35, "bodycam": false, "contrast": 1.0, "gamma": 1.0, "camera_motion": 0.65,
+	"fisheye_strength": 0.35, "bodycam": false, "bodycam_blur": 1.0, "contrast": 1.0, "gamma": 1.0, "camera_motion": 0.65,
 	"resolution_scale": 100.0, "fps_limit": 0, "rays_strength": 1.0,
 	"perspective": 0, "tp_distance": 2.8, "tp_offset": 0.5, "tp_height": 1.45,
 	"tp_side": 0, "tp_fov": 70.0, "tp_smoothing": 0.55,

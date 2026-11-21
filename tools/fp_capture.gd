@@ -87,6 +87,8 @@ func run() -> void:
 		bc.setup(stub,rect,pm)
 		player.cam_fx=bc
 		bc.set_enabled(true)
+		if OS.get_environment("VHS")!="": pm.set_shader_parameter("vhs",1.0)
+		stub.settings["bodycam_blur"]=float(OS.get_environment("BLUR")) if OS.get_environment("BLUR")!="" else 1.0
 	player.teleport(Vector3(0,0.05,8),0.0,0.0)
 	var wpn: Node=player.weapon
 	for g in wpn.ORDER: wpn.give(g,false)

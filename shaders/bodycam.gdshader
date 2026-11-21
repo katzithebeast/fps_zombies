@@ -2,8 +2,8 @@ shader_type canvas_item;
 // BODYCAM (experiment): obraz jako z kamery na helmě.
 // Širokoúhlý objektiv se soudkovým zkreslením, chromatická vada a vinětace, rozmazání pohybem
 // a rolling shutter při rychlém otočení, přepálená světla s odlesky objektivu, šum senzoru
-// ve tmě, přeostření a stopy po kompresi videa. Nahrazuje post.gdshader, jen když je režim zapnutý
-// (scripts/bodycam.gd); když se experiment zruší, stačí smazat oba soubory.
+// ve tmě, přeostření a stopy po kompresi videa. Když je režim zapnutý, běží před běžným průchodem
+// (ten pak přidá už jen VHS, je-li zapnuté) – scripts/bodycam.gd; při zrušení experimentu smazat oba soubory.
 
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear, repeat_disable;
 uniform sampler2D screen_mip : hint_screen_texture, filter_linear_mipmap, repeat_disable;

@@ -9,6 +9,9 @@ extends Node
 ## - volné míření: myš hýbe zbraní v malém okně, kamera ji dohání; zaměřovač se skryje
 ##   a střely letí ve směru hlavně. Při míření zbraň „přijde“ do středu.
 ##
+## Posuvník „Bodycam – rozmazání pohybem“ řídí sílu rozmazání; VHS kamera (V) jde přes bodycam
+## jako další průchod (bodycam -> kopie obrazovky -> běžný post.gdshader jen s VHS).
+##
 ## Všechno je v tomhle souboru a v shaderu. Ve hře jsou jen háčky označené „BODYCAM“
 ## (main.gd, player.gd, player_weapon.gd, zombie_mode.gd, menu.gd). Vypnuto = hra beze změny.
 
@@ -26,6 +29,9 @@ var enabled := false
 var mat: ShaderMaterial
 var post_rect: CanvasItem
 var post_mat: Material
+var bc_rect: ColorRect          # vlastní průchod bodycamu (před běžným postprocesem)
+var bc_copy: BackBufferCopy     # aby VHS navrch viděl už obraz z bodycamu
+var vhs_mat: ShaderMaterial     # běžný post.gdshader jen s VHS (ostatní efekty má bodycam vlastní)
 
 var _reset := true
 var _base_yaw := 0.0
@@ -49,6 +55,26 @@ func setup(m: Node, rect: CanvasItem, normal_mat: Material) -> void:
 	post_mat = normal_mat
 	mat = ShaderMaterial.new()
 	mat.shader = load("res://shaders/bodycam.gdshader")
+	# pořadí ve vrstvě postprocesu: bodycam -> kopie obrazovky -> VHS (běžný průchod)
+	var layer: Node = rect.get_parent()
+	bc_rect = ColorRect.new()
+	bc_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bc_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bc_rect.material = mat
+	bc_rect.visible = false
+	layer.add_child(bc_rect)
+	layer.move_child(bc_rect, rect.get_index())
+	bc_copy = BackBufferCopy.new()
+	bc_copy.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
+	bc_copy.visible = false
+	layer.add_child(bc_copy)
+	layer.move_child(bc_copy, rect.get_index())
+	vhs_mat = ShaderMaterial.new()
+	vhs_mat.shader = (normal_mat as ShaderMaterial).shader
+	for k in ["fisheye", "vignette", "grain", "aberration", "sharpen"]:
+		vhs_mat.set_shader_parameter(k, 0.0)
+	vhs_mat.set_shader_parameter("contrast", 1.0)
+	vhs_mat.set_shader_parameter("gamma", 1.0)
 	_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_noise.frequency = 1.0
 
@@ -181,14 +207,26 @@ func aim_transform(p: Node) -> Transform3D:
 func _process(_dt: float) -> void:
 	if post_rect == null: return
 	var on := active()
-	var want: Material = mat if on else post_mat
-	if post_rect.material != want: post_rect.material = want
-	if not on: return
+	bc_rect.visible = on
+	bc_copy.visible = on
+	if not on:
+		if post_rect.material != post_mat: post_rect.material = post_mat
+		post_rect.visible = true
+		return
+	# VHS kamera (klávesa V) jde i přes bodycam: běžný průchod pak dělá už jen VHS
+	var vhs := float(post_mat.get_shader_parameter("vhs"))
+	if post_rect.material != vhs_mat: post_rect.material = vhs_mat
+	post_rect.visible = vhs > 0.001
+	vhs_mat.set_shader_parameter("vhs", vhs)
+	for k in ["vhs_band", "vhs_bottom"]:      # úvodní briefing je vypíná
+		var pv: Variant = post_mat.get_shader_parameter(k)
+		if pv != null: vhs_mat.set_shader_parameter(k, pv)
 	var cam: Camera3D = main.player.camera
 	var vp := get_viewport().get_visible_rect().size
 	var fov_v := deg_to_rad(cam.fov)
 	var fov_h := 2.0 * atan(tan(fov_v * 0.5) * vp.x / maxf(vp.y, 1.0))
-	mat.set_shader_parameter("motion", Vector2(ang_vel.x * SHUTTER_TIME / fov_h, ang_vel.y * SHUTTER_TIME / fov_v))
+	var blur := clampf(float(main.settings.get("bodycam_blur", 1.0)), 0.0, 3.0)     # posuvník v nastavení
+	mat.set_shader_parameter("motion", Vector2(ang_vel.x * SHUTTER_TIME / fov_h, ang_vel.y * SHUTTER_TIME / fov_v) * blur)
 	mat.set_shader_parameter("shutter", -ang_vel.x * READOUT / fov_h)
 	var spd: float = Vector2(main.player.velocity.x, main.player.velocity.z).length()
 	mat.set_shader_parameter("codec", clampf(ang_vel.length() / 3.5 + maxf(spd - 3.0, 0.0) * 0.08, 0.0, 1.0))
