@@ -137,7 +137,11 @@ func run() -> void:
 					if OS.get_environment("DBG")!="": print("reload_left ",wpn.reload_left," ammo ",wpn.ammo," r_held ",wpn._r_held)
 					var rt: float=float(wpn.reload_left)
 					var caps:=[]
-					for i in 10: caps.append(rt*(i+0.5)/10.0)
+					var nc:=int(OS.get_environment("RN")) if OS.get_environment("RN")!="" else 10
+					for i in nc: caps.append(rt*(i+0.5)/float(nc))
+					if OS.get_environment("RPH")!="":
+						caps=[]
+						for ph in OS.get_environment("RPH").split_floats(","): caps.append(rt*ph)
 					await step(rt+0.6,caps,nm)
 				"check":
 					wpn.ammo=maxi(1,int(wpn.stats().mag)-3)

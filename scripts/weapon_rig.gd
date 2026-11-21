@@ -84,6 +84,9 @@ var _ex_rot:=Vector3.ZERO
 var _ex_rot_v:=Vector3.ZERO
 var _ex_off:=0.0
 var examine_override:=[]   # ladění: pevná póza prohlídky [posun, natočení]
+var _mag_hidden:=false
+var _mag_reveal:=false
+var _lf_free:=0.0           # levá ruka při přebíjení daleko od zbraně (uvolněné prsty)
 var _left_relax:=0.0        # levá ruka mimo zbraň: uvolněné prsty
 var steady:=0.0           # 0..1 míření / držené R / přebíjení
 var steady_keep:=0.1      # nastavení: kolik houpání při tom zůstane (0 = žádné)
@@ -110,6 +113,9 @@ var holster:=0.0             # 0 držení, 1 zbraň schovaná pod obrazem
 var muzzle:=Vector3(0,0.09,-0.66)
 var handle:=Vector3(0.045,0.075,-0.02)
 var hip_pose:=Vector3(-0.15,-0.235,0.30)
+# uvolněná ruka: prsty mírně pokrčené, malíček víc (přirozená kaskáda)
+const RELAX_CURL:={"Thumb":[0.25,0.3,0.2,0.4],"Index":[0.2,0.3,0.2],"Middle":[0.28,0.4,0.26],"Ring":[0.36,0.48,0.3],"Pinky":[0.45,0.55,0.34]}
+const SHOT_FINGERS:={"Thumb":[0.3,0.3,0.25,0.5],"Index":[0.3,0.4,0.25,0.0],"Middle":[0.35,0.45,0.3,0.0],"Ring":[0.75,0.95,0.65,0.0],"Pinky":[0.85,1.05,0.75,0.0]}
 const SHOULDER_SHIFT_MAX:=0.2    # vlastní pohled: o kolik se smí rameno posunout kvůli rovnému zápěstí
 const WRIST_KEEP:=0.2            # kolik z původního ohybu zápěstí zůstane (přirozený mírný ohyb)
 var CLAV_L_TP:=Vector3(0,-0.04,0.13)      # levé rameno se k podpěře předsune
@@ -199,6 +205,21 @@ var _reload_step:=0
 var _remote:=false
 var _light: OmniLight3D
 var _shells: Array=[]
+# Dvojka (IŽ-54): náboje v ruce při přebíjení a v komorách (vidět při zlomených hlavních).
+const SHOT_MOUTH_L:=Vector3(-0.0151,0.038,0.061)    # ústí komor v souřadnicích dílu Barrel (od čepu)
+const SHOT_MOUTH_R:=Vector3(0.0151,0.038,0.061)
+const SHOT_FINGER_DIR:=Vector3(1.0,0.75,0.0)    # směr prstů při vkládání (souřadnice hlavní, kolmo k ose komor)
+var loaded:=2                     # kolik nábojů je v dvojce (hráč nastavuje; vzdálení hráči 2)
+var _shot_chamber: Array=[]       # [holder, [náboj L, náboj P]]
+var _shot_hand: Array=[]          # [kostra, [náboj, náboj]]
+var _shot_hand_local: Array=[]    # místní transformace nábojů vůči kosti levé ruky
+var _shot_r_rel:=Basis()          # natočení ruky vůči hlavním při vkládání (souřadnice ruky -> hlavně)
+var _shot_pinch:=Vector3.ZERO     # bod mezi prsty (souřadnice ruky, metry): střed dvojice nábojů
+var _shot_in_hand:=0.0            # 0..1 prsty drží náboje
+var _shot_show_hand:=false
+var _shot_show_ch:=[true,true]
+var _shot_mat_hull: StandardMaterial3D
+var _shot_mat_brass: StandardMaterial3D
 var _shell_mesh: CylinderMesh
 var _sounds: Dictionary={}
 
@@ -255,6 +276,11 @@ func _ready() -> void:
 	brass.metallic=1.0
 	brass.roughness=0.32
 	_shell_mesh.material=brass
+	_shot_mat_hull=StandardMaterial3D.new()
+	_shot_mat_hull.albedo_color=Color(0.55,0.06,0.05)
+	_shot_mat_hull.roughness=0.55
+	_shot_mat_brass=brass
+	_build_shotshells()
 	_sounds={"out":_make_sound("ak_mag_out.wav",-6.0),"in":_make_sound("ak_mag_in.wav",-4.0),"bolt":_make_sound("ak_bolt.wav",-3.0),"handle":_make_sound("gun_handle_1.wav",-13.0)}
 	set_gun("ak")
 
@@ -473,6 +499,114 @@ func kick() -> void:
 	if _light: _light.light_energy=randf_range(2.2,3.2)*float(_gi().flash)
 	if _gi().shell!=Vector3.ZERO: _eject_shell(_gi().shell)
 
+## Brokový náboj 12/70: počátek v ráfku (mosazné dno), plastová nábojnice míří do -Z (jako hlaveň).
+func _make_shotshell(layer: int) -> Node3D:
+	var root:=Node3D.new()
+	var hull:=MeshInstance3D.new()
+	var hm:=CylinderMesh.new()
+	hm.top_radius=0.0092; hm.bottom_radius=0.0092; hm.height=0.056; hm.radial_segments=12; hm.rings=1
+	hm.material=_shot_mat_hull
+	hull.mesh=hm
+	hull.rotation.x=-PI/2
+	hull.position=Vector3(0,0,-0.012-0.028)
+	var base:=MeshInstance3D.new()
+	var bm:=CylinderMesh.new()
+	bm.top_radius=0.0098; bm.bottom_radius=0.0108; bm.height=0.014; bm.radial_segments=12; bm.rings=1
+	bm.material=_shot_mat_brass
+	base.mesh=bm
+	base.rotation.x=-PI/2
+	base.position=Vector3(0,0,-0.007)
+	for m in [hull,base]:
+		(m as MeshInstance3D).layers=layer
+		(m as MeshInstance3D).cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(m)
+	return root
+
+func _build_shotshells() -> void:
+	for pair in [[full,4],[first,8]]:
+		var barrel:=(pair[0] as Node3D).get_node_or_null("izh54/Barrel")
+		if barrel==null: continue
+		var shells:=[]
+		for mouth in [SHOT_MOUTH_L,SHOT_MOUTH_R]:
+			var sh:=_make_shotshell(pair[1])
+			sh.position=mouth
+			barrel.add_child(sh)
+			shells.append(sh)
+		_shot_chamber.append([pair[0],shells])
+	for pair in [[avatar.skeleton,4,avatar.skeleton],[avatar.first_skeleton,8,avatar.first_mesh]]:
+		var shells:=[]
+		for i in 2:
+			var sh:=_make_shotshell(pair[1])
+			sh.visible=false
+			avatar.model.add_child(sh)
+			shells.append(sh)
+		_shot_hand.append([pair[0],shells,pair[2]])
+
+## Úchop dvojice nábojů v levé ruce (jako v Hunt / CoD): dlaň dolů, palec proti ukazováku
+## a prostředníčku, náboje visí pod prsty dnem nahoru a míří do komor. Počítá se z kinematiky
+## prstů v póze SHOT_FINGERS: střed sevření (ráfky) a natočení ruky vůči hlavním tak, aby osa
+## nábojů šla podél komor a prsty mířily zleva doprava (předloktí přichází zleva, ne do objektivu).
+func _shot_hand_setup() -> void:
+	if not _shot_hand_local.is_empty(): return
+	var h: Dictionary=grip_solver.hand("Left")
+	var hx:=Transform3D(Basis()*HandGrip.S,Vector3.ZERO)
+	var tips:={}
+	for ch in grip_solver.chains("Left"):
+		var c: Array=SHOT_FINGERS[ch.name]
+		var pts: Array=HandGrip.fk(hx,ch,c,float(c[3])+grip_solver.adduct(ch))
+		tips[ch.name]=(pts[2] as Transform3D)*(ch.tip as Vector3)
+		tips[ch.name+"2"]=(pts[1] as Transform3D).origin
+	var n: Vector3=(h.n as Vector3).normalized()              # z dlaně ven
+	var k: Vector3=(h.k as Vector3).normalized()              # řada kloubů (ukazovák -> malíček)
+	var f: Vector3=k.cross(n).normalized()
+	if f.dot(((h.kn as Array)[1] as Vector3))<0.0: f=-f        # směr prstů
+	# ráfky drží bříška palce, ukazováku a prostředníčku
+	var pc: Vector3=((tips.Thumb as Vector3)+(tips.Index as Vector3)+(tips.Middle as Vector3))/3.0+n*0.008
+	var sa:=(n*0.9+f*0.15).normalized()                       # osa nábojů (od dna ke špičce): od dlaně
+	# ruka přichází zespodu zleva (od těla): prsty míří k hřbetu hlavní a trochu doprava, dlaň
+	# do komor, hřbet ruky ke kameře – předloktí jde zkrácené dolů ze záběru
+	var hb:=HandGrip.frame(sa,f)
+	var tb:=HandGrip.frame(Vector3(0,0,-1),SHOT_FINGER_DIR)
+	_shot_r_rel=tb*hb.transposed()
+	_shot_pinch=pc
+	var inv:=_shot_r_rel.inverse()
+	var sb:=Basis.looking_at(inv*Vector3(0,0,-1),inv*Vector3.UP)   # náboj: -Z do komory
+	for mouth in [SHOT_MOUTH_L,SHOT_MOUTH_R]:
+		_shot_hand_local.append(Transform3D(sb,pc+inv*Vector3(mouth.x,0,0)))
+
+func _update_shotshells() -> void:
+	var izh:=gun=="izh54" and equipped
+	for e in _shot_chamber:
+		for i in 2: (e[1][i] as Node3D).visible=izh and bool(_shot_show_ch[i])
+	var show:=izh and _shot_show_hand and not _shot_hand_local.is_empty()
+	for e in _shot_hand:
+		var sk: Skeleton3D=e[0]
+		var hand:=sk.find_bone("mixamorig_LeftHand")
+		var hx:=(e[2] as Node3D).global_transform*sk.get_bone_global_pose(hand)     # vlastní tělo je posunuté (first_mesh)
+		var sc:=hx.basis.get_scale().x
+		var hb:=Transform3D(hx.basis.orthonormalized(),hx.origin)
+		for i in 2:
+			var node: Node3D=e[1][i]
+			node.visible=show
+			if show:
+				var lx: Transform3D=_shot_hand_local[i]
+				node.global_transform=Transform3D(hb.basis*lx.basis,hb*(lx.origin*sc/HandGrip.S))
+
+## Vystřelené nábojnice vyhodí vyhazovač z komor dozadu nahoru.
+func _eject_shotshells() -> void:
+	if not is_inside_tree(): return
+	var holder:=full if _remote or avatar.first_mesh.layers==0 else first
+	var barrel:=_part(holder,"Barrel")
+	if barrel==null: return
+	for mouth in [SHOT_MOUTH_L,SHOT_MOUTH_R]:
+		var sh:=_make_shotshell(1)
+		get_tree().root.add_child(sh)
+		var bx:=barrel.global_transform
+		sh.global_transform=Transform3D(bx.basis.orthonormalized(),bx*mouth)
+		var b:=bx.basis.orthonormalized()
+		var velocity:=b.z*randf_range(0.7,1.1)+b.y*randf_range(0.5,0.9)+b.x*randf_range(-0.3,0.3)
+		_shells.append({"node":sh,"velocity":velocity,"spin":Vector3(randf_range(-14,14),randf_range(-6,6),randf_range(-14,14)),"age":0.0})
+
 func _eject_shell(from: Vector3) -> void:
 	if not is_inside_tree(): return
 	var holder:=full if _remote or avatar.first_mesh.layers==0 else first
@@ -528,7 +662,7 @@ func _update_shells(dt: float) -> void:
 	for shell in _shells:
 		shell.age+=dt
 		shell.velocity.y-=9.8*dt
-		var node: MeshInstance3D=shell.node
+		var node: Node3D=shell.node
 		node.global_position+=shell.velocity*dt
 		node.rotate_object_local((shell.spin as Vector3).normalized(),(shell.spin as Vector3).length()*dt)
 		if shell.age>0.9: node.queue_free()
@@ -802,6 +936,12 @@ func pose(dt: float, swimming: bool) -> void:
 	var wrist_turn:=0.0
 	var insp_relax:=0.0
 	var mag_check:=0.0       # kontrola nábojů: levá ruka drží vysunutý zásobník (úchop "mag")
+	var shot_mode:=false      # dvojka: levá ruka vkládá náboje (dráha shot_path vůči ústí komor)
+	var shot_path:=Vector3.ZERO
+	if not reloading:
+		_shot_in_hand=0.0
+		_shot_show_hand=false
+		_shot_show_ch=[loaded>=1,loaded>=2]
 	if reloading and kind=="mag":
 		r_roll=_key(phase,[[0.0,0.0],[0.1,0.42],[0.66,0.42],[0.74,-0.3],[0.9,-0.3],[1.0,0.0]])
 		r_pitch=_key(phase,[[0.0,0.0],[0.1,0.2],[0.6,0.22],[0.66,0.27],[0.72,0.16],[0.84,0.1],[0.87,0.16],[1.0,0.0]])
@@ -843,24 +983,29 @@ func pose(dt: float, swimming: bool) -> void:
 					sound.pitch_scale=1.25*sqrt(_rpitch)
 					sound.play()
 	elif reloading and kind=="break":
-		# Dvojka: zlomit hlavně dolů, vypadnou nábojnice, vložit dva nové, zaklapnout.
-		barrel_angle=_key(phase,[[0.0,0.0],[0.08,0.0],[0.18,0.8],[0.78,0.8],[0.86,0.0],[1.0,0.0]])
-		r_roll=_key(phase,[[0.0,0.0],[0.12,0.25],[0.8,0.25],[0.9,0.0]])
-		r_pitch=_key(phase,[[0.0,0.0],[0.12,-0.1],[0.8,-0.1],[0.86,0.08],[1.0,0.0]])
-		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.12,Vector3(-0.12,0.13,0.12)],[0.8,Vector3(-0.12,0.13,0.12)],[1.0,Vector3.ZERO]])
-		left_blend=_key(phase,[[0.0,0.0],[0.22,0.0],[0.3,1.0],[0.72,1.0],[0.8,0.0]])
-		var breech: Vector3=_gi().mag_hand
-		left_reload=_key(phase,[[0.0,breech],[0.3,breech+Vector3(-0.12,-0.25,0.1)],[0.42,breech+Vector3(-0.02,0.02,0)],[0.52,breech],[0.6,breech+Vector3(-0.12,-0.25,0.1)],[0.68,breech+Vector3(0.02,0.02,0)],[0.72,breech]])
-		for step in [[0.17,"out"],[0.45,"in"],[0.66,"in"],[0.85,"bolt"]]:
-			if _reload_step<4 and step==[[0.17,"out"],[0.45,"in"],[0.66,"in"],[0.85,"bolt"]][_reload_step] and phase>=float(step[0]):
+		# Dvojka: zlomit hlavně, vyhazovač vyhodí nábojnice, levá ruka vezme dva náboje,
+		# vloží je naráz do komor, vrátí se na předpažbí a hlavně zaklapne.
+		barrel_angle=_key(phase,[[0.0,0.0],[0.06,0.0],[0.16,0.85],[0.74,0.85],[0.81,0.0],[1.0,0.0]])
+		r_roll=_key(phase,[[0.0,0.0],[0.14,-0.55],[0.74,-0.55],[0.86,0.0]])
+		r_pitch=_key(phase,[[0.0,0.0],[0.14,-0.3],[0.74,-0.3],[0.8,0.08],[0.9,0.0]])
+		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.14,Vector3(-0.07,0.13,0.03)],[0.74,Vector3(-0.07,0.13,0.03)],[1.0,Vector3.ZERO]])
+		left_blend=_key(phase,[[0.0,0.0],[0.19,0.0],[0.29,1.0],[0.56,1.0],[0.69,0.0]])
+		shot_mode=true
+		# dráha dvojice nábojů (střed ráfků) vůči ústí komor: kapsa vlevo dole -> za komory -> zasunout
+		shot_path=_key(phase,[[0.0,Vector3(-0.12,-0.3,0.08)],[0.29,Vector3(-0.12,-0.3,0.08)],[0.38,Vector3(-0.03,-0.05,0.13)],
+			[0.44,Vector3(0.0,0.0,0.08)],[0.5,Vector3.ZERO],[0.54,Vector3(-0.01,-0.01,0.025)],[0.6,Vector3(-0.06,-0.08,0.06)]])
+		_shot_in_hand=smoothstep(0.26,0.31,phase)*(1.0-smoothstep(0.5,0.54,phase))
+		_shot_show_hand=phase>=0.27 and phase<0.5
+		_shot_show_ch=[phase<0.17 or phase>=0.5, phase<0.17 or phase>=0.5]
+		for step in [[0.17,"out"],[0.47,"in"],[0.5,"in"],[0.82,"bolt"]]:
+			if _reload_step<4 and step==[[0.17,"out"],[0.47,"in"],[0.5,"in"],[0.82,"bolt"]][_reload_step] and phase>=float(step[0]):
 				_reload_step+=1
 				_reload_kick(_reload_step,kind)
 				var sound: AudioStreamPlayer3D=_sounds.get(step[1])
 				if sound and sound.stream and is_inside_tree() and _full_reload==null:
 					sound.pitch_scale=0.8*sqrt(_rpitch)
 					sound.play()
-				if _reload_step==1 and is_inside_tree():
-					for shell in 2: _eject_shell(Vector3(-0.01+shell*0.02,0.06,-0.1))
+				if _reload_step==1 and is_inside_tree(): _eject_shotshells()
 	if reloading and not reload_empty:
 		# Náboj zůstává v komoře: po zasunutí zásobníku ruka rovnou zpět na předpažbí.
 		var pistol:=kind=="pistol"
@@ -1055,7 +1200,8 @@ func pose(dt: float, swimming: bool) -> void:
 				var pusher: Node3D=syr.get_meta("pusher")
 				pusher.position=syr.get_meta("pusher_rest")+(syr.get_meta("pusher_dir") as Vector3)*push
 	# Starý zásobník při přebíjení vypadne na zem; nový přijde zespodu.
-	var mag_out:=reloading and (kind=="mag" or kind=="pistol") and phase>=0.2 and phase<0.42
+	# starý zásobník vypadne (0.2), ruka sjede k sumce a nový se ukáže, až ho ruka drží (dole mimo záběr)
+	var mag_out:=reloading and (kind=="mag" or kind=="pistol") and phase>=0.2 and phase<0.44
 	if mag_out and not _mag_dropped:
 		_mag_dropped=true
 		_drop_magazine()
@@ -1063,6 +1209,8 @@ func pose(dt: float, swimming: bool) -> void:
 	for holder in [full,first]:
 		_last_mag_shift=mag_shift
 		var magazine:=_part(holder,"Magazine")
+		if magazine and holder==full: _mag_reveal=mag_out!=_mag_hidden and not mag_out
+		if magazine and holder==full: _mag_hidden=mag_out
 		if magazine:
 			magazine.position=mag_shift
 			magazine.rotation.x=mag_tilt
@@ -1099,6 +1247,18 @@ func pose(dt: float, swimming: bool) -> void:
 			if mn: mw=mn.transform*mr.affine_inverse()*mw
 			reload_wrist=full.transform*mw.origin
 			reload_basis=gun_basis*mw.basis
+		if shot_mode:
+			_shot_hand_setup()
+			var bn:=_part(full,"Barrel")
+			if bn:
+				var bx: Transform3D=bn.transform
+				var mouth_mid: Vector3=bx*((SHOT_MOUTH_L+SHOT_MOUTH_R)*0.5)
+				# shot_path: x doprava, y nahoru (souřadnice zbraně), z = vzdálenost za ústím podél komor
+				var back: Vector3=bx.basis.orthonormalized()*Vector3.BACK
+				var pc: Vector3=mouth_mid+Vector3(shot_path.x,shot_path.y,0.0)+back*shot_path.z
+				var Rg: Basis=bx.basis.orthonormalized()*_shot_r_rel
+				reload_wrist=full.transform*(pc-Rg*_shot_pinch)
+				reload_basis=gun_basis*Rg
 		var support_basis:=gun_basis*lw.basis
 		# cesta mezi úchopem a zásobníkem / závěrem vede obloukem pod zbraní, ne skrz ni
 		var sg: Vector3=lw.origin
@@ -1165,7 +1325,8 @@ func pose(dt: float, swimming: bool) -> void:
 	var part_xf:={}
 	for part in ["Magazine","Barrel"]:
 		var n:=_part(full,part)
-		if n: part_xf[part.to_lower()]=n.transform
+		# schovaný zásobník (starý vypadl, nový ještě v sumce) prsty nesmí obejmout
+		if n: part_xf[part.to_lower()]=n.transform if n.visible else Transform3D(Basis(),Vector3(0,-50,0))
 	if _socket_mode and left_blend>0.02:
 		# Levá ruka při přebíjení / kontrole nesmí projít zbraní: vytlačit ven podél povrchu.
 		var to_gun:=full.transform.affine_inverse()
@@ -1317,16 +1478,30 @@ func _fingers_on_gun(sk: Skeleton3D, dt: float, left_blend: float, part_xf: Dict
 					continue
 				# prst pokračuje z minulého snímku (časová soudržnost, pár vzorků)
 				var t0:=0.55
-				for e in (_lf_live.get("res",[]) if _lf_live.get("gun","")==gun else []):
+				if _mag_reveal: t0=0.15         # nový zásobník se právě objevil v ruce: zavírat od otevřené dlaně
+				for e in ([] if _mag_reveal else (_lf_live.get("res",[]) if _lf_live.get("gun","")==gun else [])):
 					if e[0].name==ch.name and (e[1] as Array).size()>4: t0=float(e[1][4])
 				res.append([ch,grip_solver.wrap_live(gun,hand_xf,to_gun,ch,part_xf,t0)])
 			_lf_live={"gun":gun,"res":res}
 			if _grip_debug=="time": print("živé prsty: %.2f ms" % ((Time.get_ticks_usec()-t_live)/1000.0))
 		if _lf_live.get("gun","")==gun:
 			for e in _lf_live.res: _set_chain(sk,e[0],e[1],float(e[1][3]) if (e[1] as Array).size()>3 else 0.0,weight)
+		# ruka ve vzduchu (pro zásobník, do kapsy pro náboje): prsty uvolněné, ne roztažené ani v pěst
+		var hx:=bone_pose(10)
+		var palm_g: Vector3=to_gun*(hx*(grip_solver.hand("Left").palm as Vector3))
+		var dpalm: float=HandGrip.dist(grip_solver.sdf(gun),palm_g,part_xf)
+		var free_goal:=smoothstep(0.07,0.12,dpalm)
+		_lf_free=move_toward(_lf_free,free_goal,dt*(5.0 if free_goal>_lf_free else 25.0))
+		if _lf_free>0.0:
+			for ch in grip_solver.chains("Left"):
+				_set_chain(sk,ch,RELAX_CURL[ch.name],float(RELAX_CURL[ch.name][3]) if ch.name=="Thumb" else grip_solver.adduct(ch),weight*_lf_free)
 	if _left_relax>0.0:
 		for ch in grip_solver.chains("Left"):
-			_set_chain(sk,ch,[0.15,0.15,0.1] if ch.name=="Thumb" else [0.3,0.42,0.28],0.0,weight*_left_relax)
+			_set_chain(sk,ch,RELAX_CURL[ch.name],float(RELAX_CURL[ch.name][3]) if ch.name=="Thumb" else grip_solver.adduct(ch),weight*_left_relax)
+	if _shot_in_hand>0.0:
+		# dva náboje za ráfky mezi palcem, ukazovákem a prostředníčkem; prsteníček a malíček sevřené
+		for ch in grip_solver.chains("Left"):
+			_set_chain(sk,ch,SHOT_FINGERS[ch.name],float(SHOT_FINGERS[ch.name][3])+grip_solver.adduct(ch),weight*_shot_in_hand)
 	return true
 
 func _set_chain(sk: Skeleton3D, ch: Dictionary, c: Array, side_angle: float, w: float) -> void:
@@ -1359,6 +1534,10 @@ func _follow_extra_fingers(sk: Skeleton3D) -> void:
 		sk.set_bone_pose_rotation(extra[k],sk.get_bone_rest(extra[k]).basis.get_rotation_quaternion()*delta)
 
 func pose_first_person() -> void:
+	_pose_first_person()
+	_update_shotshells()
+
+func _pose_first_person() -> void:
 	if avatar.first_mesh.layers==0: return
 	var source: Skeleton3D=avatar.skeleton
 	var target: Skeleton3D=avatar.first_skeleton

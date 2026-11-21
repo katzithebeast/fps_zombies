@@ -284,8 +284,49 @@ func _first_hit(s, to_gun: Transform3D, pts: Array, ch: Dictionary, xf: Dictiona
 ## z ní vymotá. Vrací ohyby [c1, c2, c3] (palec navíc odtažení [.., boční úhel]).
 func wrap(gun: String, hand_xf: Transform3D, to_gun: Transform3D, ch: Dictionary, xf: Dictionary, extra: Array=[], steps: int=14) -> Array:
 	if ch.name=="Thumb": return thumb(gun,hand_xf,to_gun,ch,xf,extra)
-	var c: Array=_wrap1(gun,hand_xf,to_gun,ch,xf,extra,steps,0.0)
-	return [c[0],c[1],c[2]]
+	var sa:=adduct(ch)
+	var c: Array=_wrap1(gun,hand_xf,to_gun,ch,xf,extra,steps,sa)
+	return [c[0],c[1],c[2],sa]
+
+# Prsty u sebe: úhel vůči prostředníčku v rovině dlaně (narovnaný prst). Kostra Mixamo má prsty
+# v klidu rozevřené do vějíře (malíček ~22°), při sevření pak trčí od sebe jako pařát.
+const FAN_DEG:={"Index":-1.5,"Ring":-1.5,"Pinky":1.0}
+var _adduct:={}
+
+## Natočení kořene prstu do strany (stejná osa jako side_angle ve fk), aby prst ležel u ostatních.
+func adduct(ch: Dictionary) -> float:
+	var nm: String=ch.name
+	if nm=="Thumb" or nm=="Middle": return 0.0
+	var side:="Left" if "Left" in sk.get_bone_name(ch.bones[0]) else "Right"
+	var key:=side+nm
+	if _adduct.has(key): return _adduct[key]
+	var n: Vector3=(hand(side).n as Vector3).normalized()
+	var hx:=Transform3D(Basis()*S,Vector3.ZERO)
+	var dir_of:=func(c: Dictionary, sa: float) -> Vector3:
+		var pts:=fk(hx,c,[0.0,0.0,0.0],sa)
+		var d: Vector3=(pts[2] as Transform3D)*(c.tip as Vector3)-(pts[0] as Transform3D).origin
+		return (d-n*d.dot(n)).normalized()
+	var mid: Dictionary={}
+	for c in chains(side):
+		if c.name=="Middle": mid=c
+	if mid.is_empty(): return 0.0
+	var m: Vector3=dir_of.call(mid,0.0)
+	var ang:=func(sa: float) -> float: return m.signed_angle_to(dir_of.call(ch,sa),n)
+	var a0: float=ang.call(0.0)
+	var goal:=signf(a0)*deg_to_rad(float(FAN_DEG.get(nm,0.0)))
+	# sečny: vztah je skoro lineární
+	var x0:=0.0
+	var x1:=0.15
+	var f0:=a0-goal
+	var f1: float=ang.call(x1)-goal
+	for it in 6:
+		if absf(f1-f0)<1e-6: break
+		var x2:=x1-f1*(x1-x0)/(f1-f0)
+		x0=x1; f0=f1
+		x1=clampf(x2,-0.6,0.6); f1=ang.call(x1)-goal
+		if absf(f1)<0.002: break
+	_adduct[key]=x1
+	return x1
 
 func _wrap1(gun: String, hand_xf: Transform3D, to_gun: Transform3D, ch: Dictionary, xf: Dictionary, extra: Array, steps: int, side_a: float) -> Array:
 	var s=sdf(gun)
@@ -336,8 +377,9 @@ func wrap_live(gun: String, hand_xf: Transform3D, to_gun: Transform3D, ch: Dicti
 	var r:=finger_r
 	var curl_at:=func(t: float) -> Array:
 		return [lerpf(rg[0][0],rg[0][1],t),lerpf(rg[1][0],rg[1][1],t),lerpf(rg[2][0],rg[2][1],t)]
+	var sa:=adduct(ch)
 	var pen_at:=func(t: float) -> float:
-		return float(_contact(s,to_gun,fk(hand_xf,ch,curl_at.call(t)),ch,xf,[],r)[1])
+		return float(_contact(s,to_gun,fk(hand_xf,ch,curl_at.call(t),sa),ch,xf,[],r)[1])
 	var t:=clampf(t0,0.0,1.0)
 	var p0: float=pen_at.call(t)
 	if p0>0.0:
@@ -363,7 +405,7 @@ func wrap_live(gun: String, hand_xf: Transform3D, to_gun: Transform3D, ch: Dicti
 					else: hi=m
 				t=lo
 	var out: Array=curl_at.call(t)
-	out.append(0.0)
+	out.append(sa)
 	out.append(t)
 	return out
 

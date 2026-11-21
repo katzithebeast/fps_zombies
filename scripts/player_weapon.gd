@@ -541,6 +541,7 @@ func update(dt: float) -> void:
 	rig.sprint=sprint_amount
 	rig.melee=1.0-melee_left/MELEE if melee_left>0 else 0.0
 	rig.inspect=inspect
+	rig.loaded=ammo
 	rig.examine_hold=examining or test_examine
 	rig.local_velocity=Basis(Vector3.UP,-player.yaw)*player.velocity
 	rig.step_phase=player._bob_phase
