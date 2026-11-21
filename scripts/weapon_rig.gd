@@ -5,17 +5,17 @@ extends Node
 # hip = poloha od boku, aim_y = výška při míření (mířidla v ose oka), reload = styl přebíjení.
 const GUNS:={
 	"ak":{"rsnd":"","scene":"res://assets/ak47/ak47.tscn","muzzle":Vector3(0,0.09,-0.66),"left":Vector3(-0.025,0.025,-0.26),
-		"handle":Vector3(0.045,0.075,-0.02),"mag_hand":Vector3(0,-0.15,-0.13),"hip":Vector3(-0.15,-0.235,0.30),"aim_y":-0.116,
+		"handle":Vector3(0.045,0.075,-0.02),"mag_hand":Vector3(0,-0.15,-0.13),"hip":Vector3(-0.20,-0.21,0.24),"aim_y":-0.116,
 		"reload":"mag","reload_time":2.2,"shell":Vector3(0.035,0.075,-0.06),"flash":1.0},
 	"mp40":{"rsnd":"mp40_reload.wav","scene":"res://assets/mp40/mp40.tscn","muzzle":Vector3(0,0.055,-0.62),"left":Vector3(-0.02,-0.06,-0.31),
-		"handle":Vector3(-0.035,0.045,-0.1),"mag_hand":Vector3(0,-0.17,-0.31),"hip":Vector3(-0.15,-0.22,0.30),"aim_y":-0.074,
+		"handle":Vector3(-0.035,0.045,-0.1),"mag_hand":Vector3(0,-0.17,-0.31),"hip":Vector3(-0.20,-0.20,0.24),"aim_y":-0.074,
 		"reload":"mag","reload_time":2.4,"shell":Vector3(0.03,0.05,-0.08),"flash":0.85},
 	"deagle":{"rsnd":"deagle_reload.wav","scene":"res://assets/deagle/deagle.tscn","muzzle":Vector3(0,0.08,-0.275),"left":Vector3(-0.035,-0.025,0.01),
-		"handle":Vector3(0,0.1,0.03),"mag_hand":Vector3(0,-0.07,0.02),"hip":Vector3(-0.11,-0.16,0.26),"aim_y":-0.061,
+		"handle":Vector3(0,0.1,0.03),"mag_hand":Vector3(0,-0.07,0.02),"hip":Vector3(-0.11,-0.085,0.22),"aim_y":-0.061,
 		"reload":"pistol","reload_time":1.8,"shell":Vector3(0.02,0.09,-0.02),"flash":1.2},
 	"izh54":{"rsnd":"izh_reload.wav","scene":"res://assets/izh54/izh54.tscn","muzzle":Vector3(0,0.07,-0.9),"left":Vector3(-0.025,0.03,-0.33),
-		"handle":Vector3(0,0.06,-0.15),"mag_hand":Vector3(-0.02,0.02,-0.12),"hip":Vector3(-0.15,-0.22,0.32),"aim_y":-0.053,
-		"reload":"break","reload_time":2.6,"shell":Vector3.ZERO,"flash":1.6},
+		"handle":Vector3(0,0.06,-0.15),"mag_hand":Vector3(-0.02,0.02,-0.12),"hip":Vector3(-0.20,-0.20,0.26),"aim_y":-0.053,
+		"reload":"break","reload_time":2.6,"ads_pull":0.012,"shell":Vector3.ZERO,"flash":1.6},
 }
 # Předměty, které se drží v ruce místo zbraně (stejný systém úchopu, houpání a IK).
 const ITEM_POSES:={
@@ -118,12 +118,13 @@ var ELBOW_AUTO:=1.0        # jak moc loket sleduje rovné zápěstí (0 = jen za
 var FOREARM_TWIST:=0.75    # podíl otočení dlaně, který nese předloktí místo zápěstí
 var UPPER_TWIST:=0.4       # u natažené paže nese část otočení i rameno
 var _hand_axis:={}           # kost ruky → směr ke kořeni prostředníčku v souřadnicích ruky (klid)
-const HIP_YAW:=0.0
-const HIP_ROLL:=0.0
-const SPRINT_MOVE:=Vector3(-0.04,-0.15,-0.04)
-const SPRINT_YAW:=0.42
-const SPRINT_PITCH:=0.5
-const SPRINT_ROLL:=0.3
+const ADS_PULL:=0.06        # při míření se oko vzdálí od mířidel (jinak pouzdro závěru zakryje půl obrazu)
+const HIP_YAW:=0.05
+const HIP_ROLL:=-0.09
+const SPRINT_MOVE:=Vector3(0.0,0.05,-0.02)
+const SPRINT_YAW:=0.6
+const SPRINT_PITCH:=-0.06
+const SPRINT_ROLL:=-0.55
 var sprint:=0.0          # 0..1 běh se sklopenou zbraní
 var melee:=0.0           # 0..1 průběh úderu pažbou (0 = žádný)
 var _kick:=Vector3.ZERO
@@ -582,6 +583,10 @@ func begin_reload(empty: bool=true) -> void:
 			sound.pitch_scale=_rpitch
 			sound.play()
 
+## O kolik se oko při míření odtáhne od mířidel (dlouhá pažba IŽ-54 má pravou ruku u obličeje).
+func ads_pull() -> float:
+	return float(_gi().get("ads_pull",ADS_PULL))
+
 static func _key(phase: float, keys: Array) -> Variant:
 	# Klíčové snímky [čas, hodnota] s měkkým přechodem.
 	if phase<=keys[0][0]: return keys[0][1]
@@ -612,8 +617,8 @@ const EXAMINE:={
 	# puška: pravý bok (hlaveň vlevo) → levý bok (hlaveň vpravo) → pohled podél hlavně nahoru
 	"rifle":{"loop":[0.75,5.3],"snd":[0.3,1.75,3.55],
 		"move":[[0.0,Vector3.ZERO],[0.75,Vector3(-0.045,0.14,-0.08)],[1.5,Vector3(-0.05,0.148,-0.088)],
-			[2.15,Vector3(-0.08,0.165,-0.08)],[2.75,Vector3(-0.12,0.178,-0.09)],[3.4,Vector3(-0.13,0.184,-0.095)],
-			[4.0,Vector3(-0.05,0.13,-0.07)],[4.6,Vector3(-0.055,0.136,-0.075)],[5.3,Vector3(-0.045,0.14,-0.08)]],
+			[2.15,Vector3(-0.08,0.135,0.01)],[2.75,Vector3(-0.16,0.165,0)],[3.4,Vector3(-0.17,0.171,-0.005)],
+			[4.0,Vector3(-0.05,0.11,0.02)],[4.6,Vector3(-0.055,0.116,0.015)],[5.3,Vector3(-0.045,0.14,-0.08)]],
 		"rot":[[0.0,Vector3.ZERO],[0.75,Vector3(0.12,1.0,0.35)],[1.5,Vector3(0.1,1.08,0.42)],
 			[2.15,Vector3(0.22,0.1,0.0)],[2.75,Vector3(0.1,-0.82,-0.3)],[3.4,Vector3(0.13,-0.9,-0.36)],
 			[4.0,Vector3(0.62,0.32,0.08)],[4.6,Vector3(0.7,0.38,0.14)],[5.3,Vector3(0.12,1.0,0.35)]],
@@ -621,17 +626,17 @@ const EXAMINE:={
 	# dlouhá dvojka: menší natočení, aby pažba nevjela do obličeje
 	"long":{"loop":[0.8,5.4],"snd":[0.32,1.8,3.6],
 		"move":[[0.0,Vector3.ZERO],[0.8,Vector3(-0.04,0.13,-0.05)],[1.55,Vector3(-0.045,0.136,-0.055)],
-			[2.2,Vector3(-0.07,0.15,-0.04)],[2.8,Vector3(-0.1,0.16,-0.03)],[3.45,Vector3(-0.105,0.165,-0.035)],
-			[4.05,Vector3(-0.05,0.12,-0.05)],[4.7,Vector3(-0.055,0.126,-0.055)],[5.4,Vector3(-0.04,0.13,-0.05)]],
+			[2.2,Vector3(-0.07,0.12,0.05)],[2.8,Vector3(-0.1,0.13,0.06)],[3.45,Vector3(-0.105,0.135,0.055)],
+			[4.05,Vector3(-0.05,0.1,0.03)],[4.7,Vector3(-0.055,0.106,0.025)],[5.4,Vector3(-0.04,0.13,-0.05)]],
 		"rot":[[0.0,Vector3.ZERO],[0.8,Vector3(0.1,0.85,0.3)],[1.55,Vector3(0.09,0.92,0.36)],
 			[2.2,Vector3(0.2,0.15,0.0)],[2.8,Vector3(0.1,-0.5,-0.25)],[3.45,Vector3(0.12,-0.56,-0.3)],
 			[4.05,Vector3(0.55,0.28,0.06)],[4.7,Vector3(0.62,0.33,0.12)],[5.4,Vector3(0.1,0.85,0.3)]],
 		"off":[[0.0,0.0]]},
 	# pistole: levá ruka pustí, pravý bok → náklon s horní stranou k oku → pohled na hlaveň nahoru
 	"pistol":{"loop":[0.7,4.9],"snd":[0.26,1.6,3.2],
-		"move":[[0.0,Vector3.ZERO],[0.7,Vector3(-0.065,0.125,-0.09)],[1.4,Vector3(-0.07,0.13,-0.095)],
-			[2.0,Vector3(-0.08,0.135,-0.09)],[2.6,Vector3(-0.09,0.14,-0.1)],[3.2,Vector3(-0.09,0.145,-0.105)],
-			[3.75,Vector3(-0.07,0.11,-0.07)],[4.3,Vector3(-0.075,0.116,-0.075)],[4.9,Vector3(-0.065,0.125,-0.09)]],
+		"move":[[0.0,Vector3.ZERO],[0.7,Vector3(-0.065,0.08,-0.01)],[1.4,Vector3(-0.07,0.085,-0.015)],
+			[2.0,Vector3(-0.08,0.09,-0.01)],[2.6,Vector3(-0.09,0.095,-0.02)],[3.2,Vector3(-0.09,0.1,-0.025)],
+			[3.75,Vector3(-0.07,0.065,0.01)],[4.3,Vector3(-0.075,0.071,0.005)],[4.9,Vector3(-0.065,0.08,-0.01)]],
 		"rot":[[0.0,Vector3.ZERO],[0.7,Vector3(0.12,1.0,0.35)],[1.4,Vector3(0.14,1.06,0.4)],
 			[2.0,Vector3(0.3,0.6,0.9)],[2.6,Vector3(0.35,0.45,1.25)],[3.2,Vector3(0.38,0.4,1.32)],
 			[3.75,Vector3(0.65,0.3,0.1)],[4.3,Vector3(0.72,0.35,0.16)],[4.9,Vector3(0.12,1.0,0.35)]],
@@ -794,7 +799,7 @@ func pose(dt: float, swimming: bool) -> void:
 	if reloading and kind=="mag":
 		r_roll=_key(phase,[[0.0,0.0],[0.1,0.42],[0.66,0.42],[0.74,-0.3],[0.9,-0.3],[1.0,0.0]])
 		r_pitch=_key(phase,[[0.0,0.0],[0.1,0.2],[0.6,0.22],[0.66,0.27],[0.72,0.16],[0.84,0.1],[0.87,0.16],[1.0,0.0]])
-		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.1,Vector3(0.05,0.07,0.03)],[0.62,Vector3(0.05,0.07,0.03)],[0.66,Vector3(0.05,0.085,0.03)],[0.75,Vector3(0.02,0.035,0.09)],[0.84,Vector3(0.02,0.035,0.08)],[0.87,Vector3(0.02,0.035,0.055)],[0.92,Vector3(0.02,0.035,0.09)],[1.0,Vector3.ZERO]])
+		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.1,Vector3(-0.07,0.12,0.02)],[0.62,Vector3(-0.07,0.12,0.02)],[0.66,Vector3(-0.07,0.135,0.02)],[0.75,Vector3(-0.04,0.07,0.07)],[0.84,Vector3(-0.04,0.07,0.06)],[0.87,Vector3(-0.04,0.07,0.035)],[0.92,Vector3(-0.04,0.07,0.07)],[1.0,Vector3.ZERO]])
 		mag_shift=_key(phase,[[0.0,Vector3.ZERO],[0.13,Vector3.ZERO],[0.2,Vector3(0,-0.07,-0.05)],[0.3,Vector3(0,-0.55,-0.02)],[0.44,Vector3(0,-0.6,0.0)],[0.58,Vector3(0,-0.1,-0.05)],[0.64,Vector3(0,-0.03,-0.015)],[0.67,Vector3.ZERO],[1.0,Vector3.ZERO]])
 		mag_tilt=_key(phase,[[0.0,0.0],[0.13,0.0],[0.2,-0.35],[0.44,-0.1],[0.58,-0.3],[0.67,0.0],[1.0,0.0]])
 		left_blend=_key(phase,[[0.0,0.0],[0.11,1.0],[0.92,1.0],[1.0,0.0]])
@@ -813,9 +818,9 @@ func pose(dt: float, swimming: bool) -> void:
 					sound.play()
 	elif reloading and kind=="pistol":
 		# Pistole: zásobník vypadne z rukojeti, levá ruka zasune nový a natáhne závěr.
-		r_roll=_key(phase,[[0.0,0.0],[0.12,0.35],[0.6,0.35],[0.7,-0.15],[0.9,-0.15],[1.0,0.0]])
+		r_roll=_key(phase,[[0.0,0.0],[0.12,0.5],[0.6,0.5],[0.7,-0.15],[0.9,-0.15],[1.0,0.0]])
 		r_pitch=_key(phase,[[0.0,0.0],[0.12,0.25],[0.6,0.25],[0.75,0.15],[0.85,0.2],[1.0,0.0]])
-		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.12,Vector3(0.03,0.05,-0.05)],[0.85,Vector3(0.03,0.05,-0.05)],[1.0,Vector3.ZERO]])
+		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.12,Vector3(-0.06,0.1,0.16)],[0.4,Vector3(-0.06,0.1,0.16)],[0.5,Vector3(-0.11,0.15,0.17)],[0.64,Vector3(-0.11,0.15,0.17)],[0.75,Vector3(-0.06,0.12,0.16)],[0.85,Vector3(-0.06,0.1,0.16)],[1.0,Vector3.ZERO]])
 		mag_shift=_key(phase,[[0.0,Vector3.ZERO],[0.12,Vector3.ZERO],[0.2,Vector3(0,-0.12,0.01)],[0.32,Vector3(0,-0.6,0.0)],[0.42,Vector3(0,-0.55,0.0)],[0.55,Vector3(0,-0.1,0.01)],[0.62,Vector3.ZERO],[1.0,Vector3.ZERO]])
 		left_blend=_key(phase,[[0.0,0.0],[0.1,1.0],[0.9,1.0],[1.0,0.0]])
 		var hand: Vector3=_gi().mag_hand
@@ -835,8 +840,8 @@ func pose(dt: float, swimming: bool) -> void:
 		# Dvojka: zlomit hlavně dolů, vypadnou nábojnice, vložit dva nové, zaklapnout.
 		barrel_angle=_key(phase,[[0.0,0.0],[0.08,0.0],[0.18,0.8],[0.78,0.8],[0.86,0.0],[1.0,0.0]])
 		r_roll=_key(phase,[[0.0,0.0],[0.12,0.25],[0.8,0.25],[0.9,0.0]])
-		r_pitch=_key(phase,[[0.0,0.0],[0.12,-0.25],[0.8,-0.25],[0.86,0.08],[1.0,0.0]])
-		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.12,Vector3(0.04,0.06,0.06)],[0.8,Vector3(0.04,0.06,0.06)],[1.0,Vector3.ZERO]])
+		r_pitch=_key(phase,[[0.0,0.0],[0.12,-0.1],[0.8,-0.1],[0.86,0.08],[1.0,0.0]])
+		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.12,Vector3(-0.12,0.13,0.12)],[0.8,Vector3(-0.12,0.13,0.12)],[1.0,Vector3.ZERO]])
 		left_blend=_key(phase,[[0.0,0.0],[0.22,0.0],[0.3,1.0],[0.72,1.0],[0.8,0.0]])
 		var breech: Vector3=_gi().mag_hand
 		left_reload=_key(phase,[[0.0,breech],[0.3,breech+Vector3(-0.12,-0.25,0.1)],[0.42,breech+Vector3(-0.02,0.02,0)],[0.52,breech],[0.6,breech+Vector3(-0.12,-0.25,0.1)],[0.68,breech+Vector3(0.02,0.02,0)],[0.72,breech]])
@@ -856,7 +861,8 @@ func pose(dt: float, swimming: bool) -> void:
 		var grip: Vector3=_gi().mag_hand
 		r_roll=_key(phase,[[0.0,0.0],[0.12,0.35 if pistol else 0.42],[0.67,0.35 if pistol else 0.42],[1.0,0.0]])
 		r_pitch=_key(phase,[[0.0,0.0],[0.12,0.22],[0.67,0.22],[1.0,0.0]])
-		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.12,Vector3(0.04,0.06,0.03)],[0.67,Vector3(0.04,0.06,0.03)],[1.0,Vector3.ZERO]])
+		var tm:=Vector3(-0.06,0.1,0.16) if pistol else Vector3(-0.07,0.12,0.02)
+		r_move=_key(phase,[[0.0,Vector3.ZERO],[0.12,tm],[0.67,tm],[1.0,Vector3.ZERO]])
 		left_blend=_key(phase,[[0.0,0.0],[0.11,1.0],[0.69,1.0],[0.96,0.0],[1.0,0.0]])
 		if phase>=0.67: left_reload=grip
 		wrist_turn=_key(phase,[[0.0,0.0],[0.12,0.45],[0.66,0.45],[0.95,0.0],[1.0,0.0]])
@@ -874,7 +880,7 @@ func pose(dt: float, swimming: bool) -> void:
 			var pistol: bool=kind=="pistol"
 			r_roll=(0.65 if pistol else 0.95)*k
 			r_pitch=0.12*k
-			r_move=(Vector3(-0.03,0.1,-0.06) if pistol else Vector3(0.1,0.09,0.0))*k
+			r_move=(Vector3(-0.03,0.06,0.03) if pistol else Vector3(-0.08,0.14,0.0))*k
 			mag_shift=Vector3(0,-0.07 if not pistol else -0.05,0)*k
 			if pistol:
 				# pistole: levá ruka pustí a uvolněně klesne (jako při prohlídce), zásobník jen povyjede
@@ -895,7 +901,18 @@ func pose(dt: float, swimming: bool) -> void:
 	var speed_now:=minf(avatar.blend_speed,4.0)
 	# Sprint: zbraň šikmo přes tělo hlavní vzhůru, výraznější houpání. Úder pažbou: krátký výpad vpřed.
 	var run:=sprint*(1.0-aim)*(0.0 if reloading else 1.0)
-	var jab:=sin(clampf(melee/0.6,0.0,1.0)*PI) if melee>0.0 else 0.0
+	# Úder zbraní: krátký nápřah, prudký výpad doleva vpřed s natočením na bok, výdrž, návrat.
+	# Pistole: úder rukojetí shora dolů (hlaveň se sklopí), puška: výpad bokem zbraně.
+	var mel_pistol: bool=_gi().reload=="pistol"
+	var mel_move:=Vector3.ZERO
+	var mel_rot:=Vector3.ZERO
+	if melee>0.0:
+		if mel_pistol:
+			mel_move=_key(melee,[[0.0,Vector3.ZERO],[0.12,Vector3(0.0,0.035,-0.06)],[0.27,Vector3(0.025,0.04,0.17)],[0.42,Vector3(0.02,0.035,0.15)],[1.0,Vector3.ZERO]])
+			mel_rot=_key(melee,[[0.0,Vector3.ZERO],[0.12,Vector3(0.35,-0.05,0.12)],[0.27,Vector3(-0.28,0.15,-0.35)],[0.42,Vector3(-0.25,0.13,-0.3)],[1.0,Vector3.ZERO]])
+		else:
+			mel_move=_key(melee,[[0.0,Vector3.ZERO],[0.1,Vector3(-0.02,-0.03,-0.07)],[0.25,Vector3(0.05,0.07,0.22)],[0.4,Vector3(0.045,0.065,0.19)],[1.0,Vector3.ZERO]])
+			mel_rot=_key(melee,[[0.0,Vector3.ZERO],[0.1,Vector3(0.06,-0.15,0.25)],[0.25,Vector3(-0.25,0.3,-0.55)],[0.4,Vector3(-0.22,0.27,-0.5)],[1.0,Vector3.ZERO]])
 	var calm:=1.0-maxf(maxf(inspect*0.85,ex_w*0.8),still)        # při míření a drženém R se zbraň houpe jen tolik, kolik dovolí nastavení
 	# Houpání v rytmu kroků: osmička do stran, propad a kývnutí hlavně při došlapu.
 	# Jde ve stejném rytmu jako kamera, jen se o kousek opožďuje – zbraň má váhu.
@@ -959,7 +976,7 @@ func pose(dt: float, swimming: bool) -> void:
 	# Hloubka se počítá od hlavy (kamery): když se postava při chůzi předkloní, zbraň jde s ní a nevjede do obličeje.
 	var offset:=Vector3(head.x+lerpf(hip_pose.x,0.0,aim),head.y+lerpf(hip_pose.y,float(_gi().aim_y),aim),lerpf(hip_pose.z,0.25,aim)+(head.z-HEAD_REST_Z))
 	offset+=_inertia_offset*calm*(1.0-aim*0.9)+bob+breathe*calm+Vector3(-_sway.x,_sway.y,0)*0.6*calm+Vector3(-r_move.x,r_move.y,r_move.z)
-	offset+=Vector3(SPRINT_MOVE.x,SPRINT_MOVE.y,SPRINT_MOVE.z)*run+Vector3(0.03,0.02,0.15)*jab
+	offset+=Vector3(SPRINT_MOVE.x,SPRINT_MOVE.y,SPRINT_MOVE.z)*run+mel_move
 	# zpětný ráz (posun) + pohyb + vytažení zbraně
 	offset+=Vector3(_rk_p.x,_rk_p.y,0)+Vector3(0,0,-_move_push*calm)
 	offset+=Vector3(0,_air.x,0)+Vector3(0.015,-0.035,-0.15)*obk+Vector3(-0.07,-0.07,-0.03)*ob_more
@@ -972,7 +989,7 @@ func pose(dt: float, swimming: bool) -> void:
 	# Těžká hlaveň: při rozjezdu do strany zaostává víc než ruce (vybočí), při brzdění se přehoupne.
 	var inertia_yaw:=-_inertia_offset.x*2.6*calm*(1.0-aim*0.85)
 	extra_roll+=0.22*obk+0.35*ob_more
-	var local:=Basis(Vector3.UP,ex_rot.y+_kick.y+inertia_yaw+0.12*obk-(0.55+0.35*ob_long)*ob_more+bob_yaw+_sway.x*1.2*calm+lerpf(HIP_YAW,0.0,aim)+SPRINT_YAW*run-0.3*jab)*Basis(Vector3.RIGHT,_kick.x+r_pitch-_sway.y*0.8*calm+SPRINT_PITCH*run+0.1*jab+extra_pitch)*Basis(Vector3.FORWARD,_kick.z-_sway.x*1.5*calm+r_roll+lerpf(HIP_ROLL,0.0,aim)+SPRINT_ROLL*run-0.5*jab+extra_roll)
+	var local:=Basis(Vector3.UP,ex_rot.y+_kick.y+inertia_yaw+0.12*obk-(0.55+0.35*ob_long)*ob_more+bob_yaw+_sway.x*1.2*calm+lerpf(HIP_YAW,0.0,aim)+SPRINT_YAW*run+mel_rot.y)*Basis(Vector3.RIGHT,_kick.x+r_pitch-_sway.y*0.8*calm+SPRINT_PITCH*run+mel_rot.x+extra_pitch)*Basis(Vector3.FORWARD,_kick.z-_sway.x*1.5*calm+r_roll+lerpf(HIP_ROLL,0.0,aim)+SPRINT_ROLL*run+mel_rot.z+extra_roll)
 	# Model míří do +Z; záporný úhel kolem X zvedá hlaveň.
 	var gun_basis:=tilt*Basis(Vector3.UP,PI)*local
 	var position_now:=pivot+tilt*(offset-pivot)+tilt*Vector3(0,0,-recoil)

@@ -381,4 +381,4 @@ func first_person_eye(look_yaw: float) -> Vector3:
 	var head_bone := skeleton.find_bone("mixamorig_Head")
 	var eye: Vector3 = first_mesh.global_transform * (weapon.bone_pose(head_bone).origin + weapon.head_offset)
 	var forward := Basis(Vector3.UP, look_yaw) * Vector3.FORWARD
-	return eye + forward * lerpf(0.28,0.20,weapon.weight) + Vector3(0.0, 0.07, 0.0)
+	return eye + forward * (lerpf(0.28,0.20,weapon.weight) - weapon.ads_pull() * weapon.aim) + Vector3(0.0, 0.07, 0.0)
