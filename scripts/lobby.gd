@@ -356,7 +356,7 @@ func _aabb(n: Node3D) -> AABB:
 
 func _build_props() -> void:
 	# postel u západní zdi, čelo u okna
-	_place("bed",0.0095,90.0,Vector3(0,0,-0.8),{"x_min":-W+0.04})
+	_place("bed",0.0095,-90.0,Vector3(0,0,-0.8),{"x_min":-W+0.04})
 	# polička nad postelí (slot na trofeje)
 	var wood:=mat("old_wood",0.9,Color(1.05,1.0,0.95))
 	box(Vector3(0.22,0.03,1.0),Vector3(-W+0.11,1.62,-0.8),wood)
@@ -383,24 +383,26 @@ func _build_props() -> void:
 	_interact[_body_for(tv)]={"text":"[E] Televize","call":func(): _say("Televize zatím nehraje. Tady budou tvoje statistiky.")}
 	# gauč u východní zdi, čelem k televizi přes celý pokoj
 	_place("sofa",0.72,-90.0,Vector3(0,0,0.1),{"x_max":W-0.04})
+	# skříňka v jihovýchodním rohu (oblek)
+	var locker:=_place("res://assets/props/locker/source/locker.glb",1.0,180.0,Vector3(0,0,0),{"x_max":W-0.03,"z_max":D-0.03})
+	_interact[locker.get_meta("body")]={"text":"[E] Skříňka","call":func(): _say("Skříňka s oblekem. Skiny přijdou sem.")}
 	# umyvadlo u jižní zdi a zrcadlo nad ním
-	var sink:=_place("sink",0.0095,-90.0,Vector3(0.55,0,0),{"z_max":D-0.02})
+	# mezi vypínačem u dveří a skříňkou, s mezerou od skříňky
+	var la:=_aabb(locker)
+	var sink:=_place("sink",0.0095,-90.0,Vector3(0,0,0),{"z_max":D-0.02,"x_max":la.position.x-0.15})
 	_sink_pos=_aabb(sink).get_center()
 	var sa:=_aabb(sink)
-	box(Vector3(0.5,0.62,0.03),Vector3(0.55,sa.end.y+0.5,D-0.03),flat(Color(0.18,0.17,0.15),0.5),false)
+	box(Vector3(0.5,0.62,0.03),Vector3(sa.get_center().x,sa.end.y+0.5,D-0.03),flat(Color(0.18,0.17,0.15),0.5),false)
 	var mirror:=flat(Color(0.95,0.96,0.95),0.07,1.0)
-	box(Vector3(0.44,0.56,0.01),Vector3(0.55,sa.end.y+0.5,D-0.05),mirror,false)
+	box(Vector3(0.44,0.56,0.01),Vector3(sa.get_center().x,sa.end.y+0.5,D-0.05),mirror,false)
 	var probe:=ReflectionProbe.new()
-	probe.position=Vector3(0.55,1.6,1.2)
+	probe.position=Vector3(sa.get_center().x,1.6,1.2)
 	probe.size=Vector3(5.0,3.2,3.8)
 	probe.box_projection=true
 	probe.interior=true
 	probe.update_mode=ReflectionProbe.UPDATE_ONCE
 	# zrcadlo se nasnímá, až se usadí světlo (GI potřebuje pár snímků)
 	get_tree().create_timer(1.2).timeout.connect(func(): add_child(probe))
-	# skříňka v jihovýchodním rohu (oblek)
-	var locker:=_place("res://assets/props/locker/source/locker.glb",1.0,180.0,Vector3(0,0,0),{"x_max":W-0.03,"z_max":D-0.03})
-	_interact[locker.get_meta("body")]={"text":"[E] Skříňka","call":func(): _say("Skříňka s oblekem. Skiny přijdou sem.")}
 
 func _body_for(n: Node3D, min_size:=Vector3.ZERO) -> StaticBody3D:
 	var a:=_aabb(n)

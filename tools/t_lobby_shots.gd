@@ -28,4 +28,5 @@ func run() -> void:
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png("%s/%s.png"%[out,v[0]])
 		print("shot ",v[0])
+		if v[0]=="dvere": print("sink ",lob._aabb(lob.get_node("sink")).position.x,"..",lob._aabb(lob.get_node("sink")).end.x,"  locker ",lob._aabb(lob.get_node("locker")).position.x)
 	quit()
