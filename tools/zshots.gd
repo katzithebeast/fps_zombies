@@ -97,6 +97,14 @@ func run() -> void:
 	var times:PackedStringArray=String(args.get("times","0,0.2,0.4,0.6,0.8,1.0,1.3,1.7,2.2,3.0")).split(",")
 	var bone:int=z.skeleton.find_bone("mixamorig_"+String(args.get("bone","Spine2")))
 	var dirn:=Vector3.FORWARD*float(args.get("dir","1"))
+	if args.has("dirv"):
+		var dv:PackedStringArray=String(args["dirv"]).split(",")
+		dirn=Vector3(float(dv[0]),float(dv[1]),float(dv[2])).normalized()
+	if args.has("nokd"): z.knockdowns=false
+	if args.has("noda"): z.death_anims=false
+	if args.has("feed"): z.feed()
+	if args.has("atk"): z.force_attack=String(args["atk"])
+	if args.has("death"): z.force_death=String(args["death"])
 	var t:=0.0
 	var next_hit:=0
 	var next_shot:=0
@@ -108,8 +116,9 @@ func run() -> void:
 			wake_at=-1.0
 			z.wake()
 		while next_hit<hits.size() and t>=float(hits[next_hit])-0.0001:
+			if args.has("bones"): bone=z.skeleton.find_bone("mixamorig_"+String(args["bones"]).split(",")[next_hit])
 			var p:Vector3=z.skeleton.global_transform*z.bone_pose(bone).origin
-			z.hit(bone,p-dirn*0.1,dirn,1.0)
+			z.hit(bone,p-dirn*0.1,dirn,float(args.get("str","1.0")),float(args.get("dmg","50")))
 			fx.blood(p,dirn,z.dead or z._death_pending)
 			next_hit+=1
 		if t>=float(times[next_shot])-0.0001:

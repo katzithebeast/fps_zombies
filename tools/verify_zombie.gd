@@ -34,7 +34,12 @@ func verify() -> void:
 	zombie.hit(chest,point,Vector3.FORWARD)
 	await physics_frame
 	await physics_frame
-	check(zombie.dead and zombie.simulator.is_simulating_physics(),"second body shot starts real physics simulation")
+	# smrt animací (skácení přes kolena / dozadu) předá tělo fyzice nejpozději za ~2 s
+	var waited:=0.0
+	while zombie.dead and not zombie.simulator.is_simulating_physics() and waited<2.6:
+		await physics_frame
+		waited+=1.0/60.0
+	check(zombie.dead and zombie.simulator.is_simulating_physics(),"killing shot ends in real physics simulation (%.2f s of death animation)"%waited)
 	var initial: Vector3=zombie.bodies[head].global_position
 	await create_timer(3.5).timeout
 	var final_head: Vector3=zombie.bodies[head].global_position

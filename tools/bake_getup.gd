@@ -1,7 +1,10 @@
 extends SceneTree
-## Animace vstávání zombie ze země, pečené z klíčových póz (pánev, hrudník, hlava + IK rukou a nohou):
+## Animace zombie pečené z klíčových póz (pánev, hrudník, hlava + IK rukou a nohou):
 ##   getup_front – leží na břiše: zapře se rukama, přitáhne kolena, klekne na jedno koleno, vstane
 ##   getup_back  – leží na zádech: posadí se, zapře se rukama za sebou, přitáhne nohy, zvedne se z dřepu
+##   stagger_back / stagger_left / stagger_right – zásah ji odhodí: trup se zvrátí, ruce se rozhodí
+##     a udělá dva vrávoravé kroky (dozadu / do strany). Chodidla stojí na zemi pevně: posun těla
+##     je v metadatech klipu "root_motion" (po snímcích, FPS) a hra jím posouvá kořen zombie.
 ## Konec každé animace přechází do první pózy klipu „idle“, takže navazuje bez skoku.
 ## Souřadnice kostry (jednotky kostry, Y nahoru, postava ve stoje kouká do +Z, levá strana je +X).
 ## Na konci stojí chodidla kolem počátku. Výstup: res://assets/zombie/getup_anims.res
@@ -54,6 +57,15 @@ func _initialize() -> void:
 	var lib_out:=AnimationLibrary.new()
 	lib_out.add_animation("getup_front",bake(FRONT,2.85))
 	lib_out.add_animation("getup_back",bake(BACK,2.95))
+	lib_out.add_animation("stagger_back",bake(STAGGER_BACK,1.25))
+	lib_out.add_animation("stagger_left",bake(stagger_side(1.0),1.2))
+	lib_out.add_animation("stagger_right",bake(stagger_side(-1.0),1.2))
+	# Zrcadlené varianty pro zombie se zrcadlovým postojem (idle_m): začínají i končí v jejím postoji.
+	# Zrcadlo levého úkroku je pravý úkrok, proto se jména prohodí.
+	var M:=preload("res://tools/anim_mirror.gd")
+	for pair in [["getup_front","getup_front_m"],["getup_back","getup_back_m"],["stagger_back","stagger_back_m"],
+			["stagger_left","stagger_right_m"],["stagger_right","stagger_left_m"]]:
+		lib_out.add_animation(pair[1],M.mirror(lib_out.get_animation(pair[0]),sk))
 	var err:=ResourceSaver.save(lib_out,OUT)
 	print("uloženo ",OUT," -> ",err)
 	for w in warn: print(w)
@@ -136,6 +148,72 @@ const BACK:=[
 		"rf":[Vector3(-0.15,0.13,0.04),Vector3(-0.05,-0.74,0.68),Vector3(0,1,0),Vector3(-0.1,0.2,1)]}],
 ]
 
+# Postoj v idle (první snímek): k němu se klipy zásahu vrací.
+const ST_LF:=[Vector3(0.29,0.13,0.19),Vector3(0.05,-0.74,0.68),Vector3(0,1,0),Vector3(0.35,0.2,1)]
+const ST_RF:=[Vector3(-0.31,0.13,-0.09),Vector3(-0.05,-0.74,0.68),Vector3(0,1,0),Vector3(-0.35,0.2,1)]
+const ST_LH:=[Vector3(0.14,1.18,0.36),Vector3(0.15,-0.35,0.92),Vector3(-0.2,-0.9,0.1),Vector3(0.9,-0.3,-0.4)]
+const ST_RH:=[Vector3(-0.31,1.24,0.25),Vector3(-0.15,-0.35,0.92),Vector3(0.2,-0.9,0.1),Vector3(-0.9,-0.3,-0.4)]
+static func _sh(v: Array, d: Vector3) -> Array: return [(v[0] as Vector3)+d,v[1],v[2],v[3]]
+
+# Zásah zepředu: trup se zvrátí dozadu, hlava cukne, ruce vyletí, dva kroky vzad (pravá, levá).
+const ST_BACK_END:=Vector3(0,0,-0.55)
+var STAGGER_BACK:=[
+	[0.0, {"root":Vector3.ZERO,"hips":Vector3(0,0.93,-0.01),"pelvis":[Vector3(0,1,0.08),Vector3(0,-0.08,1)],"chest":[Vector3(0,0.93,0.36),Vector3(0,-0.36,0.93)],
+		"head":[Vector3(0,0.9,0.43),Vector3(0,-0.4,0.92)],"lh":ST_LH,"rh":ST_RH,"lf":ST_LF,"rf":ST_RF}],
+	[0.08, {"root":Vector3(0,0,-0.03),"hips":Vector3(0,0.93,-0.07),"pelvis":[Vector3(0,1,-0.06),Vector3(0,0.06,1)],"chest":[Vector3(0,0.94,-0.33),Vector3(0,0.33,0.94)],
+		"head":[Vector3(0.08,0.82,-0.56),Vector3(0.05,0.56,0.82)],
+		"lh":[Vector3(0.34,1.48,0.3),Vector3(0.35,0.5,0.8),Vector3(-0.3,-0.6,0.4),Vector3(0.9,-0.4,-0.3)],
+		"rh":[Vector3(-0.36,1.42,0.24),Vector3(-0.35,0.45,0.82),Vector3(0.3,-0.6,0.4),Vector3(-0.9,-0.4,-0.3)]}],
+	[0.22, {"root":Vector3(0,0,-0.14),"hips":Vector3(0,0.9,-0.18),"chest":[Vector3(0,0.97,-0.24),Vector3(0,0.24,0.97)],
+		"head":[Vector3(-0.05,0.9,-0.4),Vector3(-0.03,0.4,0.9)],
+		"lh":[Vector3(0.5,1.5,0.05),Vector3(0.6,0.7,0.2),Vector3(-0.6,0.2,0.7),Vector3(0.6,-0.6,-0.5)],
+		"rh":[Vector3(-0.55,1.12,0.0),Vector3(-0.9,-0.3,0.2),Vector3(0.2,-0.9,0.3),Vector3(-0.3,-0.5,-0.8)],
+		"rf":_sh(ST_RF,Vector3(0.02,0.1,-0.25))}],
+	[0.36, {"root":Vector3(0,0,-0.29),"hips":Vector3(0,0.86,-0.32),"pelvis":[Vector3(0,1,0.02),Vector3(0,-0.02,1)],"chest":[Vector3(0,0.98,-0.1),Vector3(0,0.1,0.98)],
+		"rf":_sh(ST_RF,ST_BACK_END)}],
+	[0.5, {"root":Vector3(0,0,-0.41),"hips":Vector3(0,0.85,-0.43),"chest":[Vector3(0,0.97,0.12),Vector3(0,-0.12,0.97)],
+		"head":[Vector3(0,0.98,0.1),Vector3(0,-0.1,0.98)],
+		"lh":[Vector3(0.48,1.3,-0.15),Vector3(0.5,0.3,0.6),Vector3(-0.5,-0.5,0.4),Vector3(0.7,-0.6,-0.4)],
+		"rh":[Vector3(-0.5,1.2,-0.25),Vector3(-0.6,0.1,0.75),Vector3(0.4,-0.7,0.3),Vector3(-0.7,-0.6,-0.4)],
+		"lf":_sh(ST_LF,Vector3(0.0,0.1,-0.3))}],
+	[0.64, {"root":Vector3(0,0,-0.5),"hips":Vector3(0,0.86,-0.53),"lf":_sh(ST_LF,ST_BACK_END)}],
+	[0.82, {"root":ST_BACK_END,"hips":Vector3(0,0.9,-0.57),"pelvis":[Vector3(0,1,0.1),Vector3(0,-0.1,1)],"chest":[Vector3(0,0.88,0.47),Vector3(0,-0.47,0.88)],
+		"head":[Vector3(0,0.86,0.5),Vector3(0,-0.45,0.89)],"lh":_sh(ST_LH,ST_BACK_END+Vector3(0.05,-0.06,0.05)),"rh":_sh(ST_RH,ST_BACK_END+Vector3(-0.03,-0.08,0.05))}],
+	[1.02, {"hips":Vector3(0,0.93,-0.56),"chest":[Vector3(0,0.93,0.36),Vector3(0,-0.36,0.93)],"head":[Vector3(0,0.9,0.43),Vector3(0,-0.4,0.92)],
+		"lh":_sh(ST_LH,ST_BACK_END),"rh":_sh(ST_RH,ST_BACK_END)}],
+]
+
+## Zásah z boku: s = +1 odhodí zombii na její levou stranu (+X), -1 na pravou. Napřed vykročí
+## noha na té straně, druhá se dotáhne; trup se ohne od rány, hlava cukne, ruce se rozhodí.
+func stagger_side(s: float) -> Array:
+	var end:=Vector3(0.37*s,0,0)
+	var lead_f:Array=ST_LF if s>0.0 else ST_RF        # noha na straně, kam letí
+	var trail_f:Array=ST_RF if s>0.0 else ST_LF
+	var lead_h:Array=ST_LH if s>0.0 else ST_RH
+	var trail_h:Array=ST_RH if s>0.0 else ST_LH
+	var lk:="lf" if s>0.0 else "rf"
+	var tk:="rf" if s>0.0 else "lf"
+	var lhk:="lh" if s>0.0 else "rh"
+	var thk:="rh" if s>0.0 else "lh"
+	return [
+		[0.0, {"root":Vector3.ZERO,"hips":Vector3(0,0.93,-0.01),"pelvis":[Vector3(0,1,0.08),Vector3(0,-0.08,1)],"chest":[Vector3(0,0.93,0.36),Vector3(0,-0.36,0.93)],
+			"head":[Vector3(0,0.9,0.43),Vector3(0,-0.4,0.92)],"lh":ST_LH,"rh":ST_RH,"lf":ST_LF,"rf":ST_RF}],
+		[0.08, {"root":Vector3(0.04*s,0,0),"hips":Vector3(0.07*s,0.92,0.0),"pelvis":[Vector3(-0.12*s,1,0.05),Vector3(0,-0.05,1)],
+			"chest":[Vector3(0.38*s,0.88,0.28),Vector3(-0.2*s,-0.28,0.94)],"head":[Vector3(0.55*s,0.8,0.25),Vector3(-0.35*s,-0.1,0.93)],
+			lhk:[Vector3(0.6*s,1.28,0.12),Vector3(0.8*s,0.2,0.5),Vector3(0,-1,0),Vector3(0.6*s,-0.4,-0.7)],
+			thk:[Vector3(-0.12*s,1.45,0.38),Vector3(0.3*s,0.6,0.7),Vector3(0.3*s,-0.6,0.5),Vector3(-0.9*s,-0.3,-0.3)]}],
+		[0.24, {"root":Vector3(0.16*s,0,0),"hips":Vector3(0.2*s,0.88,0.0),"chest":[Vector3(0.3*s,0.92,0.25),Vector3(-0.3*s,-0.25,0.92)],
+			lk:_sh(lead_f,Vector3(0.18*s,0.11,-0.03))}],
+		[0.38, {"root":Vector3(0.27*s,0,0),"hips":Vector3(0.3*s,0.87,0.0),lk:_sh(lead_f,end),
+			"head":[Vector3(0.2*s,0.93,0.3),Vector3(-0.1*s,-0.3,0.95)]}],
+		[0.52, {"root":Vector3(0.33*s,0,0),"hips":Vector3(0.36*s,0.87,0.0),tk:_sh(trail_f,Vector3(0.2*s,0.1,0.0)),
+			"chest":[Vector3(0.05*s,0.93,0.36),Vector3(0,-0.36,0.93)]}],
+		[0.64, {"root":end,"hips":Vector3(0.37*s,0.89,-0.01),tk:_sh(trail_f,end)}],
+		[0.82, {"hips":Vector3(0.37*s,0.92,-0.01),"pelvis":[Vector3(0,1,0.08),Vector3(0,-0.08,1)],"chest":[Vector3(0,0.93,0.36),Vector3(0,-0.36,0.93)],
+			"head":[Vector3(0,0.9,0.43),Vector3(0,-0.4,0.92)],lhk:_sh(lead_h,end+Vector3(0.04*s,-0.05,0.0)),thk:_sh(trail_h,end+Vector3(0,-0.05,0.04))}],
+		[1.0, {"hips":Vector3(0.37*s,0.93,-0.01),lhk:_sh(lead_h,end),thk:_sh(trail_h,end)}],
+	]
+
 ## Doplní klíče: chybějící položka = drží hodnotu z předchozího klíče.
 static func fill(keys: Array) -> Array:
 	var out:=[]
@@ -193,6 +271,7 @@ func bake(keys_in: Array, length: float) -> Animation:
 		return vs
 	var anim:=Animation.new()
 	anim.length=length
+	var root_samples:=PackedVector3Array()
 	# stejné stopy jako ostatní klipy zombie (pánev: poloha + rotace, ostatní rotace)
 	var tracks:={}
 	var hips_pos:=anim.add_track(Animation.TYPE_POSITION_3D)
@@ -209,7 +288,10 @@ func bake(keys_in: Array, length: float) -> Animation:
 		var t:=minf(fi/FPS,length)
 		var G:={}
 		var O:={}
-		var hp: Vector3=hermite(ts,series.call("hips"),t)
+		# posun kořene (krokování): pozice ve světě -> v souřadnicích kořene, který hra posouvá
+		var rt: Vector3=hermite(ts,series.call("root"),t) if (keys[0][1] as Dictionary).has("root") else Vector3.ZERO
+		root_samples.append(rt)
+		var hp: Vector3=(hermite(ts,series.call("hips"),t) as Vector3)-rt
 		var pel: Array=[(hermite(ts,_col(series.call("pelvis"),0),t) as Vector3).normalized(),(hermite(ts,_col(series.call("pelvis"),1),t) as Vector3).normalized()]
 		var che: Array=[(hermite(ts,_col(series.call("chest"),0),t) as Vector3).normalized(),(hermite(ts,_col(series.call("chest"),1),t) as Vector3).normalized()]
 		var hed: Array=[(hermite(ts,_col(series.call("head"),0),t) as Vector3).normalized(),(hermite(ts,_col(series.call("head"),1),t) as Vector3).normalized()]
@@ -241,7 +323,8 @@ func bake(keys_in: Array, length: float) -> Animation:
 			O[arm]=O[sh]+(G[sh] as Basis)*sk.get_bone_rest(arm).origin
 			var fa:=B(s+"ForeArm")
 			var ha:=B(s+"Hand")
-			var h: Array=limb(ts,series.call("lh" if s=="Left" else "rh"),t,0.1)
+			var h: Array=(limb(ts,series.call("lh" if s=="Left" else "rh"),t,0.1) as Array).duplicate()
+			h[0]=(h[0] as Vector3)-rt
 			var ik:=two_bone(O[arm],h[0],sk.get_bone_rest(fa).origin.length(),sk.get_bone_rest(ha).origin.length(),h[3])
 			if float(ik[3])>0.03: warn.append("t=%.2f %s ruka nedosáhne o %.0f mm (rameno %s cíl %s)"%[t,s,float(ik[3])*1000,(O[arm] as Vector3).snapped(Vector3.ONE*0.01),(h[0] as Vector3).snapped(Vector3.ONE*0.01)])
 			G[arm]=aim(arm,(ik[0] as Vector3)-(O[arm] as Vector3),ik[2])
@@ -251,7 +334,8 @@ func bake(keys_in: Array, length: float) -> Animation:
 			O[ul]=O[hips]+(G[hips] as Basis)*sk.get_bone_rest(ul).origin
 			var lg:=B(s+"Leg")
 			var ft:=B(s+"Foot")
-			var f: Array=limb(ts,series.call("lf" if s=="Left" else "rf"),t,0.14)
+			var f: Array=(limb(ts,series.call("lf" if s=="Left" else "rf"),t,0.14) as Array).duplicate()
+			f[0]=(f[0] as Vector3)-rt
 			var ik2:=two_bone(O[ul],f[0],sk.get_bone_rest(lg).origin.length(),sk.get_bone_rest(ft).origin.length(),f[3])
 			if float(ik2[3])>0.03: warn.append("t=%.2f %s noha nedosáhne o %.0f mm"%[t,s,float(ik2[3])*1000])
 			G[ul]=aim(ul,(ik2[0] as Vector3)-(O[ul] as Vector3),ik2[2])
@@ -273,6 +357,9 @@ func bake(keys_in: Array, length: float) -> Animation:
 				q=idle_rot.get(b,sk.get_bone_rest(b).basis.get_rotation_quaternion())
 			if idle_rot.has(b): q=q.slerp(idle_rot[b],blend)
 			anim.rotation_track_insert_key(tracks[b],t,q.normalized())
+	if (keys[0][1] as Dictionary).has("root"):
+		anim.set_meta("root_motion",root_samples)
+		anim.set_meta("root_fps",FPS)
 	return anim
 
 static func _col(arr: Array, i: int) -> Array:

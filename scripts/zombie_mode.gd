@@ -339,9 +339,29 @@ func _place_bodies() -> void:
 			# Kaluž krve pod tělem.
 			if blood: blood.make_decal("smears_06_blood_pool",spot,Vector3.UP,randf_range(1.4,2.4),randf()*TAU,0.85)
 			zombie.kill.call_deferred(spot+Vector3.UP,Vector3(randf_range(-1,1),0,randf_range(-1,1)),zombie._ids.get("Spine2",0))
+			# U každého druhého těla klečí zombie a žere; vyruší ji hráč nablízku nebo výstřel.
+			if spot in CORPSES and CORPSES.find(spot)%2==0: _spawn_feeder(spot)
 		else:
 			zombie.lie_down.call_deferred()
 		await get_tree().physics_frame
+
+func _spawn_feeder(corpse: Vector3) -> void:
+	var start:=randf()*TAU
+	for attempt in 6:
+		var dir:=Vector3.FORWARD.rotated(Vector3.UP,start+attempt*TAU/6.0)
+		var at:=corpse+dir*0.75
+		if not _free_spot(at,0.45): continue
+		var space:=main.get_world_3d().direct_space_state
+		var up:=Vector3.UP*0.6
+		if not space.intersect_ray(PhysicsRayQueryParameters3D.create(corpse+up,at+up+dir*0.35,1)).is_empty(): continue
+		var feeder:=_make(1,["classic","cop","girl","ch10"].pick_random())
+		_zombies.erase(feeder)          # nepočítá se do kola, jako spáči
+		feeder.position=at
+		feeder.rotation.y=atan2(-dir.x,-dir.z)      # obličejem k tělu
+		feeder.target=main.player
+		main.add_child(feeder)
+		feeder.feed.call_deferred()
+		return
 
 func _make_stations() -> void:
 	stations=Interactables.new()

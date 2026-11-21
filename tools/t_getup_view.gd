@@ -21,7 +21,7 @@ func run() -> void:
 	root.add_child(m)
 	m.scale=Vector3.ONE*0.85
 	var ap: AnimationPlayer=m.get_node("AnimationPlayer")
-	ap.add_animation_library("g",load("res://assets/zombie/getup_anims.res"))
+	ap.add_animation_library("g",load(OS.get_environment("LIB") if OS.get_environment("LIB")!="" else "res://assets/zombie/getup_anims.res"))
 	ap.callback_mode_process=AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
 	var clip:=OS.get_environment("CLIP") if OS.get_environment("CLIP")!="" else "getup_front"
 	var times:=OS.get_environment("TIMES").split_floats(",") if OS.get_environment("TIMES")!="" else PackedFloat64Array([0,0.35,0.85,1.35,1.85,2.35,2.85])
@@ -30,6 +30,10 @@ func run() -> void:
 	for i in times.size():
 		ap.seek(times[i],true)
 		ap.advance(0)
+		var an: Animation=ap.get_animation("g/"+clip)
+		if an.has_meta("root_motion"):
+			var rm: PackedVector3Array=an.get_meta("root_motion")
+			m.position=rm[clampi(int(round(times[i]*float(an.get_meta("root_fps")))),0,rm.size()-1)]*m.scale.x
 		for v in [["S",Vector3(2.6,0.9,0.0)],["F",Vector3(0.9,1.1,2.4)]]:
 			cam.global_position=v[1]
 			cam.look_at(Vector3(0,0.45,-0.1),Vector3.UP)

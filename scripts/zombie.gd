@@ -41,15 +41,31 @@ var react_mult:=1.0
 const ANIMS:=preload("res://assets/zombie/zombie_anims.res")
 const GETUP:=preload("res://assets/zombie/getup_anims.res")
 const RISE_BLEND:=0.45           # jak dlouho se ležící ragdoll prolíná do první pózy vstávání (s)
+## Zrcadlené varianty klipů (<klip>_m, tools/build_zombie.gd): každá zombie chodí trochu jinak.
+const MIRRORED:=["idle","walk","run","scream"]
+## Útoky: klipy (náhodně jeden), rychlost, úsek klipu [od, do], zásahy [čas v klipu, násobek poškození],
+## dosah, odkud se útok spustí, a dosah, na který ještě zraní. Chycení: výskok, chytí za ramena, kousne do krku.
+const ATTACKS:={
+	"swipe":{"anims":["attack","attack_m"],"speed":1.5,"from":0.0,"end":1.65,"hits":[[1.05,1.0]],"hit_range":1.9},
+	"grab":{"anims":["neck_bite","neck_bite_m"],"speed":1.3,"from":0.2,"end":3.45,"hits":[[1.0,0.45],[1.95,0.85]],"hit_range":1.65,"in_clip":true},
+}
+## Smrt animací, pak fyzika: postava se skácí sama a těsně před pádem ji převezme ragdoll.
+## dying = podlomí se kolena a padá na obličej, death = trhne sebou dozadu a padá na záda.
+const DEATHS:={"dying":{"anims":["dying","dying_m"],"hand":1.95,"speed":1.1,"space":Vector3(0,0,1.1)},
+	"death":{"anims":["death"],"hand":1.45,"speed":1.15,"space":Vector3(0,0,-1.3)}}
+## Stabilita: rány ji ubírají (nohy nejvíc), sama se rychle vrací. Silná rána nebo série ran
+## zombii rozhodí (dva vrávoravé kroky), když stabilita dojde, spadne a zase se zvedne.
+const POISE_MAX:=100.0
+const POISE_HIT:={"head":1.1,"torso":0.9,"leg":1.5,"arm":0.35}
+const POISE_REGEN:=55.0
+static var knockdowns:=true          # pády po zásahu (testy je mohou vypnout)
+static var death_anims:=true         # smrt animací před ragdollem
 const GibScript:=preload("res://scripts/zombie_gib.gd")
 const MULTIPLIER:={"head":4.0,"torso":1.0,"arm":0.6,"leg":0.75}
 const TRANSFER:={"head":0.6,"torso":1.0,"arm":0.65,"leg":0.8}
 const SPEEDS:={"walk":0.75,"jog":2.1,"sprint":3.1}
 const DEEP:=0.8                  # od této hloubky zombie plave
 const SWIM_LEVEL:=0.35           # jak hluboko pod hladinou je při plavání kořen postavy
-const ATTACK_SPEED:=1.5
-const ATTACK_HIT:=1.05           # okamžik úderu v klipu (s)
-const ATTACK_END:=1.65
 const CORPSE_TIME:=14.0
 static var crowd: Array=[]
 static var corpses: Array=[]          # mrtvá těla (výbuch s nimi pohne)
@@ -89,6 +105,28 @@ var _rag_rise:=false
 var _rise_clip:=""               # getup_front / getup_back; prázdné = jen prolnutí do idle (plazivec)
 var _rise_len:=0.0
 var _rise_speed:=1.0             # každá zombie vstává trochu jinak rychle, dav se nesynchronizuje
+var _mirror:=false                # zrcadlová chůze / postoj
+var _atk:={}                      # právě běžící útok (ATTACKS)
+var _atk_hit_i:=0
+var _poise:=POISE_MAX
+var _poise_max:=POISE_MAX
+var _poise_t:=0.0
+var _knocked:=false               # leží po zásahu (ragdoll se svaly), pak vstane
+var _stagger_clip:=""             # vrávorání po zásahu (klip s posunem kořene)
+var _stagger_t:=0.0
+var _stagger_rm:=PackedVector3Array()
+var _stagger_fps:=30.0
+var _stagger_len:=0.0
+var _stagger_cool:=0.0
+var _death_anim:=""               # smrt animací (DEATHS), "" = rovnou ragdoll
+var _death_t:=0.0
+var _death_args:=[]
+var force_attack:=""              # ladění: vždy tento útok (swipe / grab)
+var force_death:=""               # ladění: vždy tato smrt animací (dying / death)
+var _kill_push:=Vector3.ZERO      # součet ran v posledním snímku (o smrti rozhoduje i brokovnice jako celek)
+var _push_frame:=-1
+var feeding:=false                # krmí se u těla (bite2), vyruší ho hráč nablízku, výstřel nebo zásah
+var _feed_rise_t:=0.0
 var keep_corpse:=false            # mrtvola jako kulisa: nezmizí
 var _sleeping:=false
 var _sleep_frozen:=false              # leží jako mrtvá, dokud hráč nepřijde blízko
@@ -141,7 +179,7 @@ var _pose_history: Dictionary={}
 var _pose_velocity: Dictionary={}
 var _pose_spin: Dictionary={}
 var _reactions: Array=[]
-const REACT_GAIN:=1.4        # celková síla škubnutí při zásahu
+const REACT_GAIN:=1.75       # celková síla škubnutí při zásahu
 var _muscles: Array=[]
 var _death_time:=0.0
 var _injured_bone:=-1
@@ -176,6 +214,9 @@ func _ready() -> void:
 	_animation=_model.get_node("AnimationPlayer")
 	_animation.add_animation_library("z",_anims_for(float(info.get("hips",1.0))))
 	_animation.callback_mode_process=AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+	_mirror=randf()<0.5
+	_poise_max=POISE_MAX*sqrt(maxf(max_health,50.0)/100.0)
+	_poise=_poise_max
 	_play("idle",1.0)
 	_animation.seek(randf()*4.0,true)
 	_animation.advance(0)
@@ -355,7 +396,7 @@ func _play(clip: String, speed: float) -> void:
 	if _clip==clip: return
 	_clip=clip
 	var blend:=0.12 if clip.contains("attack") else (0.22 if clip.contains("crawl") else 0.28)
-	_animation.play("z/"+clip,blend)
+	_animation.play("z/"+(clip+"_m" if _mirror and clip in MIRRORED else clip),blend)
 
 func _say(group: String, volume: float) -> void:
 	if sfx: sfx.play_at(group,global_position+Vector3.UP*(0.4 if _is_low() else 1.7),volume,_pitch)
@@ -364,7 +405,7 @@ func _wl() -> float:
 	return float(water_at.call(global_position)) if water_at.is_valid() else water_level
 
 func _is_low() -> bool:
-	return crawling or swimming or _low
+	return crawling or swimming or _low or feeding
 
 func _is_descendant(bone: int, ancestor: int) -> bool:
 	var parent:=skeleton.get_bone_parent(bone)
@@ -387,6 +428,9 @@ func _physics_process(dt: float) -> void:
 	PerfMon.add("Zombie AI",Time.get_ticks_usec()-_perf_t0)
 
 func _physics_process_timed(dt: float) -> void:
+	if dead and _death_anim!="":
+		_update_death_anim(dt)
+		return
 	if dead:
 		for impact in _pending_impacts:
 			var body: PhysicalBone3D=bodies.get(impact[0])
@@ -616,8 +660,13 @@ func _update_ragdoll(dt: float) -> void:
 			if Vector2(to.x,to.z).length()<4.5 and absf(to.y)<2.0: wake()
 		return
 	if not _rag_rise:
+		for impact in _pending_impacts:
+			var body: PhysicalBone3D=bodies.get(impact[0])
+			if body: body.apply_impulse(impact[2],(impact[1]-body.global_position).limit_length(0.4))
+		_pending_impacts.clear()
+		if _knocked: _drive_muscles(true)
 		_water_forces()
-		var settled:=_rag_t>1.3 and hips.linear_velocity.length()<0.5
+		var settled:=_rag_t>(1.0 if _knocked else 1.3) and hips.linear_velocity.length()<0.5
 		if settled or _rag_t>4.0:
 			_begin_rise(hips)
 		elif _rag_t>0.15 and hips.global_position.y<_wl()+0.6 and not get_meta("splashed",false):
@@ -634,6 +683,7 @@ func _update_ragdoll(dt: float) -> void:
 			simulator.influence=1.0-smoothstep(0.0,1.0,kr)
 			if kr>=1.0: _rag_bodies_off()
 		_animation.advance(dt*_rise_speed)
+		if not simulator.active: _update_reactions(dt)
 		if _rag_t*_rise_speed>=_rise_len-0.01:
 			_rise_clip=""
 			_blocker.collision_layer=128
@@ -671,6 +721,8 @@ func _begin_rise(hips: PhysicalBone3D) -> void:
 	_rag_rise=true
 	_rag_t=0.0
 	_rise_clip=""
+	var knocked:=_knocked
+	_knocked=false
 	# Kořen postavy přesunout pod pánev a natočit podle těla; tělesa zůstanou, kde leží.
 	var keep:={}
 	for id in bodies: keep[id]=bodies[id].global_transform
@@ -685,8 +737,9 @@ func _begin_rise(hips: PhysicalBone3D) -> void:
 		var spine:=_rag_bone("Head")-_rag_bone("Hips")
 		var chest:=(_rag_bone("LeftArm")-_rag_bone("RightArm")).cross(spine)
 		_rise_clip="getup_front" if chest.y<0.0 else "getup_back"
+		if _mirror and _animation.has_animation("z/"+_rise_clip+"_m"): _rise_clip+="_m"
 		# Klip leží podél osy Z: na břiše hlavou dopředu, na zádech nohama dopředu.
-		var along:=Vector3(spine.x,0.0,spine.z)*(1.0 if _rise_clip=="getup_front" else -1.0)
+		var along:=Vector3(spine.x,0.0,spine.z)*(1.0 if _rise_clip.begins_with("getup_front") else -1.0)
 		if along.length()>0.05: rotation.y=atan2(along.x,along.z)
 		global_position=Vector3(at.x,floor_y,at.z)
 		var anim:=_animation.get_animation("z/"+_rise_clip)
@@ -696,7 +749,7 @@ func _begin_rise(hips: PhysicalBone3D) -> void:
 		var shift:=_rag_bone("Hips")-hip0
 		global_position+=Vector3(shift.x,0.0,shift.z)
 		_rise_len=anim.length
-		_rise_speed=randf_range(0.88,1.15)*(0.85 if kind=="alpha" else 1.0)
+		_rise_speed=randf_range(0.88,1.15)*(0.85 if kind=="alpha" else 1.0)*(1.15 if knocked else 1.0)
 		_clip=_rise_clip
 		_clip_speed=1.0
 		_animation.play("z/"+_rise_clip,0.0)
@@ -706,13 +759,16 @@ func _begin_rise(hips: PhysicalBone3D) -> void:
 		forward.y=0
 		global_position=Vector3(at.x,floor_y,at.z)
 		if forward.length()>0.1: rotation.y=atan2(forward.x,forward.z)
+		if crawling:
+			# bez nohy: z ležení rovnou do plazení
+			_play("crawl",0.35)
 	for id in bodies:
 		bodies[id].global_transform=keep[id]
 		bodies[id].linear_velocity=Vector3.ZERO
 		bodies[id].angular_velocity=Vector3.ZERO
 		bodies[id].linear_damp=8.0
 		bodies[id].angular_damp=8.0
-	if _rise_clip=="": _play("idle",1.0)
+	if _rise_clip=="" and not crawling: _play("idle",1.0)
 
 func _land() -> void:
 	_drop=Vector3.ZERO
@@ -752,6 +808,15 @@ func _think(dt: float) -> void:
 	if _knock.length()>0.03:
 		_move(_knock*dt)
 		_knock*=exp(-9.0*dt)
+	_poise_t+=dt
+	_stagger_cool=maxf(0.0,_stagger_cool-dt)
+	if _poise_t>0.6: _poise=minf(_poise_max,_poise+POISE_REGEN*dt)
+	if _stagger_clip!="":
+		_update_stagger(dt)
+		return
+	if feeding or _feed_rise_t>0.0:
+		_update_feeding(dt)
+		return
 	if _emerge>0.0:
 		_rise(dt)
 		return
@@ -794,15 +859,19 @@ func _think(dt: float) -> void:
 		_attack_left-=dt
 		_attack_time+=dt
 		# Výpad: běžící zombie se do úderu vrhne a setrvačnost doběhne až k ráně (nezastaví se jako socha).
-		var hit_t:=ATTACK_HIT/ATTACK_SPEED
+		# Chycení má výskok v samotném klipu, kořen se nehýbe.
+		var hits: Array=_atk.hits
+		var hit_t:=(float(hits[0][0])-float(_atk.from))/float(_atk.speed)
 		var lunge:=maxf(0.6,_lunge*(1.0-_attack_time/hit_t))
-		if _attack_time<hit_t and distance>0.8: _move(forward*lunge*dt)
+		if _attack_time<hit_t and distance>0.8 and not _atk.get("in_clip",false): _move(forward*lunge*dt)
 		else: _move(Vector3.ZERO)
-		if not _attack_hit:
-			if _attack_time>=ATTACK_HIT/ATTACK_SPEED:
+		if _atk_hit_i<hits.size():
+			var h: Array=hits[_atk_hit_i]
+			if _attack_time>=(float(h[0])-float(_atk.from))/float(_atk.speed):
+				_atk_hit_i+=1
 				_attack_hit=true
-				if distance<1.9 and height<1.5 and to.normalized().dot(forward)>0.3 and not _lured(): attacked.emit(attack_damage)
-			elif distance>2.8: _attack_left=0.0      # cíl utekl z dosahu: nedokončovat úder do prázdna
+				if distance<float(_atk.hit_range) and height<1.5 and to.normalized().dot(forward)>0.3 and not _lured(): attacked.emit(attack_damage*float(h[1]))
+			elif _atk_hit_i==0 and distance>2.8: _attack_left=0.0      # cíl utekl z dosahu: nedokončovat úder do prázdna
 		return
 	var reach:=1.3 if (tier=="walk" or kind=="alpha" or swimming) else 2.1
 	if distance<(1.05 if low else reach) and height<1.5 and _stagger<=0.0:
@@ -815,13 +884,7 @@ func _think(dt: float) -> void:
 				if not _lured(): attacked.emit(attack_damage*0.7)
 			_move(Vector3.ZERO)
 		else:
-			_play("attack",ATTACK_SPEED)
-			_animation.seek(0.0,true)
-			_attack_left=ATTACK_END/ATTACK_SPEED
-			_attack_time=0.0
-			_attack_hit=false
-			_lunge=0.6 if distance<1.4 else float(SPEEDS[tier])*0.8*_gait_factor
-			_say("zombie_attack",-5.0 if _lunge<1.0 else -2.5)
+			_start_attack(distance)
 		return
 	var speed:=0.0
 	if swimming:
@@ -895,12 +958,23 @@ func hit(bone: int, point: Vector3, direction: Vector3, strength: float=1.0, dam
 	# Hybnost střely působí v místě zásahu, nikoli vždy do pánve a vzhůru.
 	var weapon_energy:=clampf(sqrt(maxf(damage,1.0)/50.0),0.55,1.65)
 	var impulse:=direction*14.0*strength*weapon_energy*float(TRANSFER[region])
+	# součet ran v tomto snímku (broky brokovnice přijdou naráz)
+	var frame_now:=Engine.get_physics_frames()
+	if frame_now!=_push_frame:
+		_push_frame=frame_now
+		_kill_push=Vector3.ZERO
+	_kill_push+=impulse
 	if dead:
+		if _death_anim!="":
+			# skácí se: další rána ho převezme do fyziky hned, ve směru střely
+			_death_handoff(point,impulse,bone)
+			return
 		if _frozen and not _unfreeze(): return
 		_wake()
 		_pending_impacts.append([bone,point,impulse])
 		return
-	if _death_pending: return
+	if _death_pending: return      # další broky v tomtéž okamžiku jsou už v _kill_push
+	if feeding: _feed_rise()
 	last_region=region
 	# flat = úder pažbou: stejná síla do kterékoli části těla.
 	var amount:=damage if flat else damage*strength*float(MULTIPLIER[region])
@@ -918,21 +992,37 @@ func hit(bone: int, point: Vector3, direction: Vector3, strength: float=1.0, dam
 		elif region=="arm" and randf()<0.6: _sever(side+"ForeArm",direction)
 		kill.call_deferred(point,impulse,bone)
 		return
-	# Síla škubnutí podle skutečné rány: Deagle a brokovnice trhnou víc než samopal.
-	_react(bone,point,direction,strength*clampf(amount/40.0,0.85,1.8),region)
-	if flat:
-		_stagger=0.7
-		_knock+=Vector3(direction.x,0,direction.z)*2.6
 	var limit:=maxf(70.0,max_health*0.55)
-	if region=="leg" and float(_limb_damage[limb])>=limit:
+	var lost_leg:=region=="leg" and float(_limb_damage[limb])>=limit and not crawling
+	# Stabilita: kolik rána zombii rozhodí. V běhu zakopne snáz, alfa skoro vůbec.
+	var pd:=amount*float(POISE_HIT[region])*weapon_energy*react_mult
+	if flat: pd=maxf(pd,60.0*react_mult)
+	pd*=1.0+0.5*clampf(_velocity.length()/2.5,0.0,1.0)
+	if lost_leg:
 		_sever(side+"Leg",direction)
-		if not crawling:
-			# Bez nohy jde k zemi a plazí se dál.
-			crawling=true
-			_attack_left=0.0
-			_scream_left=0.0
-			_stagger=0.6
-	elif region=="arm" and float(_limb_damage[limb])>=limit:
+		# Bez nohy jde k zemi (pád) a plazí se dál.
+		crawling=true
+		_attack_left=0.0
+		_scream_left=0.0
+		_stagger=0.6
+	if _ragdolled:
+		_hit_while_down(bone,point,impulse,pd)
+		_react(bone,point,direction,strength*clampf(amount/40.0,0.85,1.8),region)
+	elif (lost_leg and _drop.is_zero_approx() and not swimming and _emerge<=0.0) or (knockdowns and _poise-pd<=0.0 and _can_fall()):
+		_poise=_poise_max*0.7
+		_poise_t=0.0
+		_knockdown(bone,point,impulse,region)
+	else:
+		_poise-=pd
+		_poise_t=0.0
+		# Síla škubnutí podle skutečné rány: Deagle a brokovnice trhnou víc než samopal.
+		_react(bone,point,direction,strength*clampf(amount/40.0,0.85,1.8),region)
+		if flat:
+			_stagger=0.7
+			_knock+=Vector3(direction.x,0,direction.z)*2.6
+		if (pd>=36.0 or _poise<_poise_max*0.4) and _can_fall() and _stagger_clip=="" and _stagger_cool<=0.0:
+			_start_stagger(direction)
+	if not lost_leg and region=="arm" and float(_limb_damage[limb])>=limit:
 		_sever(side+"ForeArm",direction)
 
 func _sever(part: String, direction: Vector3) -> void:
@@ -969,7 +1059,9 @@ func _react(bone: int, point: Vector3, direction: Vector3, strength: float, regi
 	_stagger=maxf(_stagger,float({"head":0.5,"torso":0.3,"leg":0.42,"arm":0.16}[region]))
 	# Zásah do těla nebo hlavy přeruší rozmáchnutí: palba má zastavovací účinek.
 	if _attack_left>0.0 and not _attack_hit and region!="arm": _attack_left=0.0
-	_knock+=Vector3(direction.x,0,direction.z)*float({"head":1.2,"torso":1.7,"leg":0.8,"arm":0.5}[region])*strength*react_mult
+	_knock+=Vector3(direction.x,0,direction.z)*float({"head":1.2,"torso":1.7,"leg":0.8,"arm":0.5}[region])*strength*react_mult*(0.3 if _stagger_clip!="" else 1.0)
+	# nervové škubnutí: náhodné osy pro paže a hlavu, doznívá ~0,6 s
+	_reactions[-1]["spasm"]=[Vector3(randf_range(-1,1),randf_range(-1,1),randf_range(-1,1)).normalized(),Vector3(randf_range(-1,1),randf_range(-1,1),randf_range(-1,1)).normalized(),randf()*TAU]
 
 func _rotate_bone(bone: int, axis: Vector3, angle: float) -> void:
 	if bone<0 or axis.length_squared()<0.0001: return
@@ -1040,6 +1132,18 @@ func _update_reactions(dt: float) -> void:
 				_rotate_bone(chest,Vector3.UP,envelope*twist*0.6)
 				_rotate_bone(neck,bend,-envelope*0.3)
 				skeleton.set_bone_pose_position(0,skeleton.get_bone_pose_position(0)-Vector3.UP*envelope*0.03)
+	# Škubnutí nervů: paže a hlava sebou po ráně ještě krátce cuknou (rychle tlumené kmity).
+	for reaction in _reactions:
+		var sp: Array=reaction.get("spasm",[])
+		if sp.is_empty(): continue
+		var age: float=reaction.age
+		var amp:=exp(-age*6.5)*(1.0-exp(-age*30.0))*float(reaction.strength)*0.16
+		if amp<0.004: continue
+		var wob:=sin(age*29.0+float(sp[2]))
+		for nm in ["LeftArm","RightArm","LeftForeArm","RightForeArm"]:
+			if _ids.has(nm) and not _gone(_ids[nm]):
+				_rotate_bone(_ids[nm],sp[0] if nm.begins_with("Left") else sp[1],amp*wob*(1.0 if nm.ends_with("ForeArm") else 0.7))
+		_rotate_bone(head,sp[1],amp*sin(age*23.0+float(sp[2])*1.7)*0.8)
 	_reactions=_reactions.filter(func(reaction): return reaction.age<1.3)
 	# Série zásahů do silné zombie nesmí sečíst šest úleků do přetočeného kloubu.
 	for id in reference:
@@ -1090,12 +1194,47 @@ func _add_overlap_exceptions() -> void:
 
 func kill(point: Vector3, impulse: Vector3, bone: int) -> void:
 	if dead: return
+	var anim:=_pick_death(point,impulse,bone)
 	dead=true
-	_ragdolled=false
-	simulator.influence=1.0
 	health=0
 	_rng.randomize()
 	_blocker.collision_layer=0
+	_stagger_clip=""
+	feeding=false
+	_feed_rise_t=0.0
+	if anim!="":
+		# Smrt animací: skácí se sám, těsně před pádem ho převezme fyzika (_death_handoff).
+		var d: Dictionary=DEATHS[anim]
+		var variants: Array=d.anims
+		_death_anim=anim
+		_death_t=0.0
+		_death_args=[point,impulse,bone]
+		_ragdolled=false
+		_attack_left=0.0
+		_scream_left=0.0
+		crowd.erase(self)
+		_clip=anim
+		_clip_speed=float(d.speed)*randf_range(0.92,1.08)
+		_animation.play("z/"+String(variants[1] if (_mirror and variants.size()>1) else variants[0]),0.12)
+		_animation.seek(0.0,true)
+		if not _severed.has(_ids["Head"]): _say("zombie_death",-5.0)
+		if fx and bodies.has(bone) and not _severed.has(bone): fx.spurt(self,bone,randf_range(1.2,2.2),0.35)
+		died.emit(point,impulse,bone)
+		return
+	_ragdoll_death(point,impulse,bone)
+	if not _severed.has(_ids["Head"]): _say("zombie_death",-5.0)
+	# Z rány po smrti ještě chvíli teče krev (slabý pulz dolů, ne tepenný proud).
+	if fx and bodies.has(bone) and not _severed.has(bone): fx.spurt(self,bone,randf_range(1.2,2.2),0.35)
+	died.emit(point,impulse,bone)
+
+## Ragdoll mrtvého těla: tělesa do aktuální pózy, klouby, svaly, rychlost z animace a rána.
+func _ragdoll_death(point: Vector3, impulse: Vector3, bone: int) -> void:
+	_ragdolled=false
+	_knocked=false
+	_rag_rise=false
+	_rise_clip=""
+	_death_anim=""
+	simulator.influence=1.0
 	for area in hitboxes: area.collision_layer=0
 	simulator.active=true
 	simulator.physical_bones_start_simulation()
@@ -1145,10 +1284,211 @@ func kill(point: Vector3, impulse: Vector3, bone: int) -> void:
 			for name in ["Hips","Spine","Spine2"]:
 				var body: PhysicalBone3D=bodies[_ids[name]]
 				_pending_impacts.append([_ids[name],body.global_position,push*body.mass*(1.3 if name=="Spine2" else 0.7)])
-	if not _severed.has(_ids["Head"]): _say("zombie_death",-5.0)
-	# Z rány po smrti ještě chvíli teče krev (slabý pulz dolů, ne tepenný proud).
-	if fx and bodies.has(bone) and not _severed.has(bone): fx.spurt(self,bone,randf_range(1.2,2.2),0.35)
-	died.emit(point,impulse,bone)
+
+## Která smrt: zásah do hlavy, silná zbraň zblízka, běh, voda nebo uříznutá končetina = rovnou fyzika
+## (padne jako podťatá). Jinak se často skácí animací – přes kolena, nebo zásah zepředu dozadu.
+func _pick_death(point: Vector3, impulse: Vector3, bone: int) -> String:
+	if not death_anims or keep_corpse or _ragdolled or _sleeping or feeding or _feed_rise_t>0.0: return ""
+	if crawling or swimming or _is_low() or _emerge>0.0 or not _drop.is_zero_approx() or not _severed.is_empty(): return ""
+	var region:=_region(bone)
+	if region=="head" or maxf(impulse.length(),_kill_push.length())>17.0 or _velocity.length()>2.6 or (randf()>0.65 and force_death==""): return ""
+	var local: Vector3=global_basis.inverse()*impulse.normalized()
+	var pick:="death" if (region=="torso" and local.z<-0.45 and randf()<0.55) else "dying"
+	if force_death!="": pick=force_death
+	# na pád musí být místo, jinak by prošel zdí
+	for name in [pick,"dying"]:
+		var space: Vector3=DEATHS[name].space
+		var from:=global_position+Vector3.UP*0.6
+		if _ray(from,from+global_basis*space).is_empty(): return name
+	return ""
+
+func _update_death_anim(dt: float) -> void:
+	_death_t+=dt*_clip_speed
+	_animation.advance(dt*_clip_speed)
+	_update_reactions(dt)
+	if wall_guard: _keep_out_of_walls()
+	_sample_pose_motion(dt)
+	for area in hitboxes:
+		if area.collision_layer!=0:
+			area.global_transform=skeleton.global_transform*bone_pose(area.get_meta("bone"))*area.get_meta("offset")
+	if _death_t>=float(DEATHS[_death_anim].hand):
+		var args: Array=_death_args
+		_death_handoff(args[0],(args[1] as Vector3)*0.12,args[2])
+
+## Konec smrti animací: tělo převezme fyzika i s rychlostí, kterou mělo v animaci.
+func _death_handoff(point: Vector3, impulse: Vector3, bone: int) -> void:
+	if _death_anim=="": return
+	_ragdoll_death(point,impulse,bone)
+	if not corpses.has(self): corpses.append(self)
+
+# ------------------------------------------------------------------ pád po zásahu, vrávorání
+
+func _can_fall() -> bool:
+	return not crawling and not swimming and not _ragdolled and _emerge<=0.0 and _drop.is_zero_approx() and not feeding and _feed_rise_t<=0.0 and not _sleeping
+
+## Silná rána nebo došlá stabilita: zombie upadne jako hadrová panenka se zbytkem svalů
+## (ruce se snaží zachytit, nohy se podlomí), pak vstane animací (_begin_rise).
+func _knockdown(bone: int, point: Vector3, impulse: Vector3, region: String) -> void:
+	_ragdolled=true
+	_knocked=true
+	_rag_t=0.0
+	_rag_rise=false
+	_rise_clip=""
+	_stagger_clip=""
+	_attack_left=0.0
+	_scream_left=0.0
+	_reactions.clear()
+	_blocker.collision_layer=0
+	simulator.influence=1.0
+	simulator.active=true
+	simulator.physical_bones_start_simulation()
+	for id in bodies:
+		bodies[id].global_transform=(skeleton.global_transform*bone_pose(id)*bodies[id].body_offset).orthonormalized()
+	for id in bodies: _configure_joint(id,false)
+	_add_overlap_exceptions()
+	_pull_bodies_out_of_walls()
+	for id in bodies:
+		var body: PhysicalBone3D=bodies[id]
+		body.collision_layer=0 if _gone(id) else 32
+		body.linear_damp=0.05
+		body.angular_damp=0.6
+		body.linear_velocity=_velocity+_knock*0.5+Vector3(_pose_velocity.get(id,Vector3.ZERO))*0.65
+		body.angular_velocity=Vector3(_pose_spin.get(id,Vector3.ZERO))*0.65
+	_knock=Vector3.ZERO
+	_injured_bone=bone
+	_muscles.clear()
+	for id in bodies:
+		var parent:=_physical_parent(id)
+		if parent>=0:
+			_muscles.append({"bone":id,"parent":parent,"target":bodies[parent].global_basis.inverse()*bodies[id].global_basis})
+	_pending_impacts.append([bone,point,impulse*1.1])
+	var flat:=Vector3(impulse.x,0,impulse.z).normalized()
+	if region=="leg":
+		# noha se podlomí: chodidlo ujede ve směru rány, trup jde dolů a dopředu (setrvačnost)
+		var side:="Left" if String(bodies[bone].get_meta("part_name")).begins_with("Left") else "Right"
+		var foot: int=_ids.get(side+"Foot",bone)
+		if bodies.has(foot): _pending_impacts.append([foot,bodies[foot].global_position,flat*bodies[foot].mass*2.2])
+		var chest: PhysicalBone3D=bodies[_ids["Spine2"]]
+		var ahead:=global_basis.z*0.9+Vector3.DOWN*0.4
+		_pending_impacts.append([_ids["Spine2"],chest.global_position,ahead*chest.mass])
+	else:
+		# trup odhodí ve směru střely, hlava se zvrátí
+		for nm in ["Spine2","Head"]:
+			var b: PhysicalBone3D=bodies.get(_ids.get(nm,-1))
+			if b: _pending_impacts.append([_ids[nm],b.global_position,flat*b.mass*(1.4 if nm=="Spine2" else 0.8)])
+	_say("zombie_attack",-6.0)
+
+## Rána do ležící / vstávající zombie: ležící tělo jen postrčí, vstávající může znovu srazit.
+func _hit_while_down(bone: int, point: Vector3, impulse: Vector3, pd: float) -> void:
+	if simulator.active and not _rag_rise:
+		var body: PhysicalBone3D=bodies.get(bone)
+		if body: body.apply_impulse(impulse*0.7,(point-body.global_position).limit_length(0.4))
+		_rag_t=minf(_rag_t,0.7)
+	elif _rag_rise and _rise_clip!="" and knockdowns and pd>=24.0:
+		_knockdown(bone,point,impulse,_region(bone))
+
+## Vrávorání: rána zepředu = dva kroky vzad, z boku = úkrok stranou. Chodidla drží na zemi,
+## kořen se posouvá podle "root_motion" klipu. Zásah do zad jen škubne a postrčí.
+func _start_stagger(direction: Vector3) -> void:
+	var local: Vector3=global_basis.inverse()*direction
+	var clip:="stagger_back"
+	if absf(local.x)>absf(local.z)*0.9: clip="stagger_left" if local.x>0.0 else "stagger_right"
+	elif local.z>0.25: return
+	if _mirror and _animation.has_animation("z/"+clip+"_m"): clip+="_m"
+	var anim:=_animation.get_animation("z/"+clip)
+	if anim==null or not anim.has_meta("root_motion"): return
+	_stagger_clip=clip
+	_stagger_t=0.0
+	_stagger_rm=anim.get_meta("root_motion")
+	_stagger_fps=float(anim.get_meta("root_fps"))
+	_stagger_len=anim.length
+	_attack_left=0.0
+	_scream_left=0.0
+	_knock=Vector3.ZERO
+	_clip=clip
+	_clip_speed=randf_range(0.95,1.18)
+	_animation.play("z/"+clip,0.08)
+	_animation.seek(0.0,true)
+
+func _root_at(t: float) -> Vector3:
+	var f:=t*_stagger_fps
+	var i:=clampi(int(f),0,_stagger_rm.size()-1)
+	var j:=mini(i+1,_stagger_rm.size()-1)
+	return _stagger_rm[i].lerp(_stagger_rm[j],clampf(f-float(i),0.0,1.0))
+
+func _update_stagger(dt: float) -> void:
+	var before:=_root_at(_stagger_t)
+	_stagger_t+=dt*_clip_speed
+	var step:=(_root_at(_stagger_t)-before)*float(TYPES.get(kind,TYPES.classic).get("hips",1.0))
+	_velocity=global_basis*step/maxf(dt,0.0001)
+	_move(global_basis*step)
+	if _stagger_t>=_stagger_len-0.02:
+		_stagger_clip=""
+		_stagger_cool=0.5
+		_clip=""
+		_play("idle",1.0)
+
+# ------------------------------------------------------------------ útoky
+
+func _start_attack(distance: float) -> void:
+	var kind_now:="swipe"
+	if distance>0.85 and distance<1.55 and randf()<0.3: kind_now="grab"
+	if force_attack!="": kind_now=force_attack
+	_atk=ATTACKS[kind_now]
+	var anims: Array=_atk.anims
+	var anim: String=anims[1] if (anims.size()>1 and (randf()<0.5)) else anims[0]
+	_clip="attack"
+	_clip_speed=float(_atk.speed)
+	_animation.play("z/"+anim,0.12)
+	_animation.seek(float(_atk.from),true)
+	_attack_left=(float(_atk.end)-float(_atk.from))/float(_atk.speed)
+	_attack_time=0.0
+	_attack_hit=false
+	_atk_hit_i=0
+	_lunge=0.6 if distance<1.4 else float(SPEEDS[tier])*0.8*_gait_factor
+	_say("zombie_attack",-5.0 if _lunge<1.0 else -2.5)
+
+# ------------------------------------------------------------------ krmení u těla
+
+## Zombie se krmí u mrtvoly (podřep, žere). Vyruší ji hráč nablízku, výstřel (noise) nebo zásah.
+func feed() -> void:
+	feeding=true
+	ai=false
+	_clip=""
+	_play("bite2",randf_range(0.85,1.1))
+	_animation.seek(randf()*2.0,true)
+
+func _feed_rise() -> void:
+	if not feeding: return
+	feeding=false
+	_feed_rise_t=(6.9-5.3)/1.25
+	_clip="bite"
+	_clip_speed=1.25
+	_animation.play("z/bite",0.25)
+	_animation.seek(5.3,true)
+	_say("zombie_attack",-4.0)
+
+func _update_feeding(dt: float) -> void:
+	_move(Vector3.ZERO)
+	if feeding:
+		if is_instance_valid(target):
+			var d: Vector3=target.global_position-global_position
+			if Vector2(d.x,d.z).length()<5.0 and absf(d.y)<2.0: _feed_rise()
+		return
+	_feed_rise_t-=dt
+	if is_instance_valid(target):
+		var to: Vector3=target.global_position-global_position
+		rotation.y=lerp_angle(rotation.y,atan2(to.x,to.z),1.0-exp(-4.0*dt))
+	if _feed_rise_t<=0.0:
+		_feed_rise_t=0.0
+		_clip=""
+		alert(randf()<0.6)
+		if _clip=="": _play("idle",1.0)
+
+## Výstřel / hluk: krmící se zombie v okolí zvednou hlavu a jdou se podívat.
+static func noise(at: Vector3, radius: float) -> void:
+	for z in crowd:
+		if is_instance_valid(z) and z.feeding and z.global_position.distance_to(at)<radius: z._feed_rise()
 
 # Dopady mrtvého těla: pánev, hrudník, hlava a paže při prudkém zabrzdění o podlahu žuchnou.
 const IMPACT_PARTS:={"Hips":[0.0,0.82],"Spine2":[-1.0,0.9],"Head":[-6.0,1.12],"LeftForeArm":[-9.0,1.2],"RightForeArm":[-9.0,1.2],"LeftLeg":[-8.0,1.0],"RightLeg":[-8.0,1.0]}
@@ -1218,8 +1558,19 @@ func _tone(id: int) -> float:
 	if id==_injured_bone: tone*=0.2
 	return tone
 
-func _drive_muscles() -> void:
-	if _resting: return
+## Svalové napětí živého těla při pádu: zpočátku drží (ruce se snaží zachytit), po dopadu povolí.
+func _alive_tone(id: int) -> float:
+	var region:=_region(id)
+	var k:=clampf(_rag_t/1.1,0.0,1.0)
+	var tone:=lerpf(0.55,0.22,k)
+	if region=="leg": tone=lerpf(0.3,0.08,k)
+	elif region=="arm": tone=lerpf(0.45,0.2,k)
+	elif region=="head": tone=lerpf(0.6,0.3,k)
+	if id==_injured_bone: tone*=0.3
+	return tone
+
+func _drive_muscles(alive: bool=false) -> void:
+	if _resting and not alive: return
 	var dt:=get_physics_process_delta_time()
 	for muscle in _muscles:
 		var body: PhysicalBone3D=bodies[muscle.bone]
@@ -1229,7 +1580,7 @@ func _drive_muscles() -> void:
 		var i_p: float=_inertia[muscle.parent]
 		var i_eff:=i_c*i_p/(i_c+i_p)
 		var omega:=11.0 if region=="torso" else (9.0 if region=="leg" else 7.0)
-		var k:=omega*omega*i_eff*_tone(muscle.bone)
+		var k:=omega*omega*i_eff*(_alive_tone(muscle.bone) if alive else _tone(muscle.bone))
 		# Trvalé tření v kloubech dává tělu váhu: končetiny nelétají jako špagety.
 		var friction:=(9.0 if region=="torso" else (7.0 if region=="head" else 4.5))*i_eff
 		var c:=2.0*sqrt(k*i_eff)+friction
@@ -1239,7 +1590,7 @@ func _drive_muscles() -> void:
 		var torque:=((error*k-velocity*(k*dt+c))/denom).limit_length(120.0 if region in ["torso","leg"] else 40.0)
 		PhysicsServer3D.body_apply_torque(body.get_rid(),torque)
 		PhysicsServer3D.body_apply_torque(parent.get_rid(),-torque)
-	if _death_time<1.5: return
+	if alive or _death_time<1.5: return
 	# Pojistka: tělo, které se na nerovnosti chvěje, se po 7 s zapeče tak jako tak.
 	if _death_time>7.0:
 		_resting=true
@@ -1505,6 +1856,7 @@ func _unfreeze() -> bool:
 
 ## Výbuch: živé zabije a s každým tělem (i ležícím) mrští od středu podle vzdálenosti.
 func blast(center: Vector3, radius: float, speed: float) -> void:
+	if _death_anim!="": _death_handoff(global_position+Vector3.UP,Vector3.ZERO,_ids["Spine2"])
 	if not dead and not _death_pending:
 		hit(_ids["Spine2"],global_position+Vector3.UP,(global_position-center).normalized(),2.8,99999.0)
 	elif _frozen and not _unfreeze():

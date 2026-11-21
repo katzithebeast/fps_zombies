@@ -2,19 +2,33 @@ extends SceneTree
 ## Spuštění: Godot --headless --path . --script res://tools/build_zombie.gd
 ## Z klipů v assets/zombie/anims připraví knihovnu animací přenesenou na kostru zombie.
 const BASE:="res://assets/zombie/"
-const CLIPS:={"idle":true,"walk":true,"run":true,"crawl":true,"crawl_fast":true,"attack":false,"scream":false}
+const AnimMirror:=preload("res://tools/anim_mirror.gd")
+const CLIPS:={"idle":true,"walk":true,"run":true,"crawl":true,"crawl_fast":true,"attack":false,"scream":false,
+	# Scary Zombie Pack: výpad s chycením a kousnutím do krku, krmení u těla (bite = sedne si, žere,
+	# vstane; bite2 = smyčka žraní v podřepu), smrt dozadu, smrt přes kolena na obličej
+	"neck_bite":false,"bite":false,"bite2":true,"death":false,"dying":false}
+## Klipy, které nemají posun odečtený: tělo se v nich skutečně pohne (výpad, pád).
+const KEEP_MOTION:=["neck_bite","bite","bite2","death","dying"]
+## Zrcadlené varianty (<klip>_m): každá zombie chodí trochu jinak, úder jde z druhé strany.
+const MIRROR:=["idle","walk","run","attack","scream","neck_bite","dying"]
+var clips:=CLIPS
+var out:=BASE+"zombie_anims.res"
 
 func _initialize() -> void:
+	if OS.get_environment("CLIPS")!="":
+		clips={}
+		for c in OS.get_environment("CLIPS").split(","): clips[c.trim_suffix("*")]=c.ends_with("*")
+		out=OS.get_environment("OUT")
 	var model: Node3D=load(BASE+"zombie.fbx").instantiate()
 	root.add_child(model)
 	var target: Skeleton3D=model.get_node("Skeleton3D")
 	var library:=AnimationLibrary.new()
-	for clip in CLIPS:
+	for clip in clips:
 		var scene: Node3D=load(BASE+"anims/"+clip+".fbx").instantiate()
 		var source: Skeleton3D=scene.find_children("*","Skeleton3D",true,false)[0]
 		var player: AnimationPlayer=scene.find_children("*","AnimationPlayer",true,false)[0]
 		var from: Animation=player.get_animation(player.get_animation_list()[0])
-		var looped: bool=CLIPS[clip]
+		var looped: bool=clips[clip]
 		var anim:=Animation.new()
 		anim.length=from.length
 		anim.loop_mode=Animation.LOOP_LINEAR if looped else Animation.LOOP_NONE
@@ -47,19 +61,27 @@ func _initialize() -> void:
 				var first: Vector3=from.track_get_key_value(track,0)
 				var last: Vector3=from.track_get_key_value(track,count-1)
 				travel=Vector2(last.x-first.x,last.z-first.z).length()*ratio
+				var keep: bool=clip in KEEP_MOTION
 				for key in count:
 					var t:=from.track_get_key_time(track,key)
 					var value: Vector3=from.track_get_key_value(track,key)
 					# Odstranit jen plynulý posun vpřed; kolébání boků zůstává. Světem hýbe skript.
 					var along:=t/from.length
-					value.x-=first.x+(last.x-first.x)*along
-					value.z-=first.z+(last.z-first.z)*along
+					if keep:
+						value.x-=first.x
+						value.z-=first.z
+					else:
+						value.x-=first.x+(last.x-first.x)*along
+						value.z-=first.z+(last.z-first.z)*along
 					value.y-=rest_source.y
 					if looped: value=value.lerp(Vector3(0,first.y-rest_source.y,0),smoothstep(from.length-0.1,from.length,t))
 					anim.position_track_insert_key(index,t,rest_target+value*ratio)
 		anim.set_meta("speed",travel/from.length)
 		print(clip," length=%.2f tracks=%d speed=%.2f m/s ratio=%.2f"%[anim.length,anim.get_track_count(),travel/from.length,ratio])
 		library.add_animation(clip,anim)
+		if clip in MIRROR and OS.get_environment("CLIPS")=="":
+			library.add_animation(clip+"_m",AnimMirror.mirror(anim,target))
+			print(clip,"_m mirrored")
 		scene.free()
-	print("SAVE ",ResourceSaver.save(library,BASE+"zombie_anims.res"))
+	print("SAVE ",ResourceSaver.save(library,out))
 	quit()

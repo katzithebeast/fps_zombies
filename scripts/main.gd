@@ -3335,6 +3335,8 @@ func _strike_effects(victim: Node3D, bone: int, point: Vector3, direction: Vecto
 func _weapon_fired(_origin: Vector3, hit: Vector3) -> void:
 	var direction: Vector3=(hit-_origin).normalized()
 	var own: bool=player!=null and player.weapon.equipped and _origin.distance_to(player.camera.global_position)<0.3
+	# Výstřel vyruší zombie, které se v okolí krmí u těl.
+	preload("res://scripts/zombie.gd").noise(_origin,18.0)
 	var muzzle: Vector3=player.body.weapon.muzzle_global() if own else _origin
 	var space:=get_world_3d().direct_space_state
 	# Hlaveň přes roh nesmí přeskočit zeď mezi kamerou a ústím.
