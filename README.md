@@ -254,3 +254,9 @@ Kontrola fyziky: `--headless --path . --script res://tools/verify_zombie.gd`.
 ## Předměty (Sketchfab, autoři dle stažených balíčků)
 Weapon Crate, Locker Equipment, Ammo Box, Visible Interactive Human Exploding Skull, Pumpkin Grenade,
 Stylized Weapons Workbench, Syringe Gun – Dirty. Před zveřejněním doplnit autory a licence ze Sketchfabu.
+
+## Karanténní pokoj (lobby)
+Hráčův pokoj ve starém sanatoriu (`lobby.tscn`, `scripts/lobby.gd`), z menu tlačítkem **My room**, Esc vrací do menu.
+Zatím jedna místnost se zavřenými dveřmi: postel, komoda s televizí, gauč, stůl s rádiem (E zapne odposlech),
+umyvadlo se zrcadlem, skříňka na oblek, nástěnka a polička jako budoucí sloty na odemčené věci.
+Autoři modelů (CC BY 4.0): `assets/lobby/CREDITS.md`. Náhledy: `--script res://tools/t_lobby_shots.gd`.

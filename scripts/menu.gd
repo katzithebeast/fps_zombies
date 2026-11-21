@@ -7,6 +7,7 @@ signal changed(key: String)
 signal play_pressed
 signal resume_pressed
 signal quit_pressed
+signal room_pressed
 signal host_pressed(display_name: String, port: int, automatic_port: bool)
 signal join_pressed(display_name: String, address: String, port: int)
 signal disconnect_pressed
@@ -91,6 +92,7 @@ func _ready() -> void:
 			play_pressed.emit())
 	_button(_main_box, "Settings", func(): _show_settings(true))
 	_button(_main_box, "Customize", func(): _show_customize(true))
+	_button(_main_box, "My room", func(): room_pressed.emit())
 	_button(_main_box, "Multiplayer", func(): _show_multiplayer(true))
 	_button(_main_box, "Quit", func(): quit_pressed.emit())
 	_footer = Label.new()

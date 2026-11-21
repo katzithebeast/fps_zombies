@@ -226,6 +226,8 @@ func _ready() -> void:
 	menu.play_pressed.connect(_on_play)
 	menu.resume_pressed.connect(_on_resume)
 	menu.quit_pressed.connect(func(): get_tree().quit())
+	# karanténní pokoj (lobby) – zatím samostatná scéna, Esc vrací sem
+	menu.room_pressed.connect(func(): get_tree().change_scene_to_file("res://lobby.tscn"))
 	_setup_network()
 	_apply_look()
 	mode = ModeScript.new()
