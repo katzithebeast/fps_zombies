@@ -335,6 +335,7 @@ func update_body(dt: float, feet: Vector3, look_yaw: float, movement: Vector3, c
 	# Nejdřív vyhodnotit pózu, pak teprve umístit kameru. Automatický update
 	# po kameře nechával objektiv při běhu o snímek uvnitř pohybujícího se trupu.
 	tree.advance(dt)
+	weapon.look_yaw = look_yaw      # VISOR (experiment): otření hledí míří ke kameře
 	weapon.pose(dt,swimming)
 	weapon.pose_first_person()
 

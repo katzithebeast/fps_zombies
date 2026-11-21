@@ -1006,6 +1006,7 @@ func hurt(damage: float, source: Node3D=null) -> void:
 	_pulse=1.0
 	_muffle=1.0
 	main.sfx.play("player_hurt",-2.0)
+	if main.visor: main.visor.on_hurt(damage,source)      # VISOR (experiment): krev na hledí
 	player.pitch=clampf(player.pitch+randf_range(0.03,0.07),-1.5,1.5)
 	if source and is_instance_valid(source):
 		# Úder odněkud: šipka na okraji obrazu a hlava cukne od útočníka.

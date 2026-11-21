@@ -451,7 +451,7 @@ func can_reload() -> bool:
 	return equipped and reload_left<=0 and _switch_left<=0 and ammo<int(stats().mag) and (infinite_reserve or reserve>0)
 
 func reload() -> void:
-	if not can_reload() or player.swimming or melee_left>0: return
+	if not can_reload() or player.swimming or melee_left>0 or float(player.body.weapon.wipe)>0.0: return      # VISOR: ne při otírání
 	inspect=0.0
 	_r_held=0.0
 	player.body.weapon.begin_reload(ammo==0)
@@ -460,6 +460,7 @@ func reload() -> void:
 
 func melee() -> void:
 	if not equipped or melee_left>0 or reload_left>0 or _switch_left>0.0 or player.swimming or not player.control_enabled or player.interaction_locked: return
+	if float(player.body.weapon.wipe)>0.0: return      # VISOR (experiment): ruka je u hledí
 	melee_left=MELEE
 	_melee_pending=true
 	if ResourceLoader.exists("res://audio/melee.wav"):
@@ -499,8 +500,9 @@ func update(dt: float) -> void:
 	var rmb:=enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	examining=enabled and Input.is_physical_key_pressed(KEY_N) and not lmb and not rmb and reload_left<=0 and melee_left<=0 and inspect<0.05 and sprint_amount<0.3
 	if _tag: _tag.queue_redraw()
-	var trigger:=enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and inspect<0.2 and float(player.body.weapon._ex_w)<0.35
-	var sights:=(enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) or (test_aim and equipped)
+	var wiping:=float(player.body.weapon.wipe)>0.0      # VISOR (experiment): levá ruka otírá hledí
+	var trigger:=enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and inspect<0.2 and float(player.body.weapon._ex_w)<0.35 and not wiping
+	var sights:=((enabled and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) or (test_aim and equipped)) and not wiping
 	var s: Dictionary=stats()
 	if reload_left>0:
 		reload_left=maxf(0,reload_left-dt)

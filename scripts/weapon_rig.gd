@@ -182,6 +182,17 @@ var _idle_goal:=Vector3.ZERO
 var _idle_next:=2.0
 var _was_crouch:=false
 const MASS:={"ak":1.0,"mp40":0.9,"deagle":0.6,"izh54":1.15}
+# VISOR (experiment): otření hledí levou rukou (scripts/visor.gd)
+const WIPE_TIME:=1.1
+var wipe:=0.0                 # 0..1 průběh otření hledí (0 = neotírá)
+var look_yaw:=0.0             # směr pohledu (nastavuje player_body) – poloha kamery při otírání
+var wipe_contact:=0.0         # dlaň je právě na skle
+var wipe_wrist:=Vector3.ZERO  # ve světě: zápěstí, střed dlaně, konec prstů (kudy dlaň přejela)
+var wipe_palm:=Vector3.ZERO
+var wipe_tip:=Vector3.ZERO
+var _wipe_rest:={}
+var _wipe_fingers:=[]
+var _wipe_spread:={}          # první článek prstu → úhel do strany (prsty u sebe)
 
 func impulse(pos_vel: Vector3, rot_vel: Vector3) -> void:
 	# Vnější náraz do zbraně: dopad ze skoku, cvaknutí zásobníku, natažení závěru.
@@ -838,6 +849,9 @@ func _examine_sound() -> void:
 
 func pose(dt: float, swimming: bool) -> void:
 	_time+=dt
+	if wipe>0.0:      # VISOR (experiment)
+		wipe+=dt/WIPE_TIME
+		if wipe>=1.0 or swimming: wipe=0.0
 	_springs(dt)
 	recoil=_rk_p.z
 	_kick=_rk_r
@@ -1049,6 +1063,10 @@ func pose(dt: float, swimming: bool) -> void:
 	r_move+=ex_move
 	r_pitch+=ex_rot.x
 	r_roll+=ex_rot.z
+	var w_env:=wipe_env()      # VISOR (experiment): levá ruka pustí, zbraň v pravé klesne
+	r_move+=Vector3(0.03,-0.075,0.02)*w_env
+	r_pitch-=0.1*w_env
+	r_roll+=0.22*w_env
 	var speed_now:=minf(avatar.blend_speed,4.0)
 	# Sprint: zbraň šikmo přes tělo hlavní vzhůru, výraznější houpání. Úder pažbou: krátký výpad vpřed.
 	var run:=sprint*(1.0-aim)*(0.0 if reloading else 1.0)
@@ -1357,7 +1375,7 @@ func pose(dt: float, swimming: bool) -> void:
 	_right_basis=right_basis
 	_left_free=left_blend
 	_trigger_pull=move_toward(_trigger_pull,0.0,dt*9.0)
-	var disc_goal:=1.0 if (reloading or inspect>0.05 or ex_w>0.05 or run>0.35 or lower>0.2 or melee>0.0) else 0.0
+	var disc_goal:=1.0 if (reloading or inspect>0.05 or ex_w>0.05 or run>0.35 or lower>0.2 or melee>0.0 or wipe>0.0) else 0.0
 	_discipline=move_toward(_discipline,disc_goal,dt*(5.0 if disc_goal>_discipline else 3.5))
 	if _socket_mode and _fingers_on_gun(sk,dt,left_blend,part_xf): return
 	# Palec a ukazovák (indexy jako u scientisty); prostředníček, prsteníček a malíček mají
@@ -1545,7 +1563,9 @@ func _pose_first_person() -> void:
 		target.set_bone_pose_position(bone,source.get_bone_pose_position(bone))
 		target.set_bone_pose_rotation(bone,source.get_bone_pose_rotation(bone))
 		target.set_bone_pose_scale(bone,source.get_bone_pose_scale(bone))
-	if weight<0.001: return
+	if weight<0.001:
+		_wipe_first_person()      # VISOR (experiment): otírá se i beze zbraně
+		return
 	# Vlastní objektiv je před rameny. Paže i AK mají pro tento pohled
 	# samostatnou shodnou korekci; plná postava ve 3. osobě se tím nedeformuje.
 	var correction:=Vector3(0,0,0.15/0.86*weight)
@@ -1597,6 +1617,146 @@ func _pose_first_person() -> void:
 	solve_arm(8,9,10,left_target,swing*Vector3(0.6,head.y-0.5,0.15),_left_basis)
 	first_right_error=bone_pose(22).origin.distance_to(right_target-_right_basis.orthonormalized()*grip_offset(22))*0.86
 	first_left_error=bone_pose(10).origin.distance_to(left_target-_left_basis.orthonormalized()*grip_offset(10))*0.86
+	_pose_skeleton=null
+	_wipe_first_person()      # VISOR (experiment)
+
+# ------------------------------------------------------------------ VISOR (experiment): otření hledí
+
+func can_wipe() -> bool:
+	return wipe<=0.0 and melee<=0.0 and reload_left<=0.0 and inspect<0.05 and _ex_w<0.05 and holster<0.5 and not ITEM_POSES.has(gun)
+
+func start_wipe() -> bool:
+	if not can_wipe(): return false
+	wipe=0.0001
+	return true
+
+## Jak moc ruka právě otírá (0 = drží zbraň / visí, 1 = je u hledí).
+func wipe_env() -> float:
+	if wipe<=0.0: return 0.0
+	return smoothstep(0.0,0.26,wipe)*(1.0-smoothstep(0.78,1.0,wipe))
+
+## Dráha levé ruky v souřadnicích pohledu (metry; x doprava, y nahoru, z dopředu od oka):
+## [zápěstí, směr prstů, kam míří dlaň]. Dlaň leží na zakřiveném hledí a přejede zleva doprava.
+static func _wipe_path(p: float) -> Array:
+	# x, y = zápěstí, z = jak moc dlaň leží na skle (plynulá rychlost mezi body)
+	var k: Vector3=_key(p,[[0.0,Vector3(-0.17,-0.25,0.0)],[0.26,Vector3(-0.155,-0.165,0.0)],[0.34,Vector3(-0.115,-0.09,1.0)],
+		[0.52,Vector3(-0.01,-0.07,1.0)],[0.7,Vector3(0.09,-0.08,1.0)],[0.8,Vector3(0.13,-0.17,0.0)],[1.0,Vector3(0.14,-0.25,0.0)]])
+	var x:=k.x
+	var y:=k.y
+	var on:=clampf(k.z,0.0,1.0)
+	# hledí je zakřivené: u okrajů je sklo blíž k oku
+	var z_glass:=0.126-1.5*x*x
+	var z:=lerpf(0.175,z_glass,on)
+	var fingers:=Vector3(lerpf(0.42,0.1,smoothstep(0.3,0.75,p)),1.0,lerpf(0.25,-0.05,on))
+	var palm:=Vector3(-x*1.6,-0.15,-1.0)
+	return [Vector3(x,y,z),fingers.normalized(),palm.normalized()]
+
+static func _wipe_curl(nm: String) -> float:
+	return 0.08 if "Thumb" in nm else (0.07 if "Index" in nm else (0.09 if "Middle" in nm else (0.12 if "Ring" in nm else 0.15)))
+
+## Úhel do strany pro první článek ukazováku, prsteníčku a malíčku, aby prsty ležely u sebe
+## (klidová póza rukavice je má roztažené). Spočítá se jednou z klidové kostry.
+func _wipe_spread_solve(sk: Skeleton3D) -> void:
+	var H:=sk.get_bone_global_rest(10)
+	var n: Vector3=_wipe_rest.n
+	var dir_of:=func(b1: int, sa: float) -> Vector3:
+		var b2:=sk.get_bone_children(b1)[0]
+		var b3:=sk.get_bone_children(b2)[0]
+		var q1:=sk.get_bone_rest(b1).basis.get_rotation_quaternion()*Quaternion(Vector3.BACK,sa)*Quaternion(Vector3.RIGHT,_wipe_curl(sk.get_bone_name(b1)))
+		var g1:=H*Transform3D(Basis(q1),sk.get_bone_rest(b1).origin)
+		var q2:=sk.get_bone_rest(b2).basis.get_rotation_quaternion()*Quaternion(Vector3.RIGHT,_wipe_curl(sk.get_bone_name(b2)))
+		var g2:=g1*Transform3D(Basis(q2),sk.get_bone_rest(b2).origin)
+		var d:=g2*sk.get_bone_rest(b3).origin-g1.origin
+		return (d-n*d.dot(n)).normalized()
+	var mid:=sk.find_bone("mixamorig_LeftHandMiddle1")
+	if mid<0: return
+	var m: Vector3=dir_of.call(mid,0.0)
+	for f in [["Index",4.0],["Ring",4.0],["Pinky",9.0]]:
+		var b1:=sk.find_bone("mixamorig_LeftHand%s1"%f[0])
+		if b1<0 or sk.get_bone_children(b1).is_empty(): continue
+		var ang:=func(sa: float) -> float: return m.signed_angle_to(dir_of.call(b1,sa),n)
+		var a0: float=ang.call(0.0)
+		var goal:=signf(a0)*deg_to_rad(float(f[1]))
+		var x0:=0.0
+		var x1:=0.15
+		var f0:=a0-goal
+		var f1: float=ang.call(x1)-goal
+		for it in 8:
+			if absf(f1-f0)<1e-6: break
+			var x2:=x1-f1*(x1-x0)/(f1-f0)
+			x0=x1; f0=f1
+			x1=clampf(x2,-0.8,0.8); f1=ang.call(x1)-goal
+		_wipe_spread[b1]=x1
+
+static func _wframe(y: Vector3, z_hint: Vector3) -> Basis:
+	var Y:=y.normalized()
+	var X:=Y.cross(z_hint)
+	if X.length()<1e-4: X=Y.cross(Vector3.FORWARD)
+	X=X.normalized()
+	return Basis(X,Y,X.cross(Y))
+
+func _wipe_first_person() -> void:
+	wipe_contact=0.0
+	var w:=wipe_env()
+	if w<=0.0 or avatar.first_mesh.layers==0: return
+	var sk: Skeleton3D=avatar.first_skeleton
+	_pose_skeleton=sk
+	if _wipe_rest.is_empty():
+		var h:=sk.get_bone_global_rest(10)
+		var m1:=sk.get_bone_global_rest(sk.find_bone("mixamorig_LeftHandMiddle1")).origin
+		var i1:=sk.get_bone_global_rest(sk.find_bone("mixamorig_LeftHandIndex1")).origin
+		var p1:=sk.get_bone_global_rest(sk.find_bone("mixamorig_LeftHandPinky1")).origin
+		var fr:=(m1-h.origin).normalized()
+		_wipe_rest={"f":fr,"n":fr.cross(i1-p1).normalized(),"b":h.basis.orthonormalized(),
+			"m2":sk.find_bone("mixamorig_LeftHandMiddle2"),"m3":sk.find_bone("mixamorig_LeftHandMiddle3"),"m1":sk.find_bone("mixamorig_LeftHandMiddle1")}
+		for b in sk.get_bone_count():
+			var nm:=sk.get_bone_name(b)
+			if nm.begins_with("mixamorig_LeftHand") and not nm.ends_with("4") and nm!="mixamorig_LeftHand": _wipe_fingers.append(b)
+		_wipe_spread_solve(sk)
+	# kamera: stejný výpočet jako player.gd (oko z kosti hlavy), převedený do souřadnic kostry
+	var S: Transform3D=avatar.first_mesh.global_transform
+	var inv:=S.affine_inverse()
+	var eye: Vector3=inv*avatar.first_person_eye(look_yaw)
+	var cb:=Basis(Vector3.UP,look_yaw)*Basis(Vector3.RIGHT,pitch)
+	var to_s:=func(v: Vector3) -> Vector3: return inv.basis*(cb.x*v.x+cb.y*v.y-cb.z*v.z)
+	var path: Array=_wipe_path(wipe)
+	var target: Vector3=eye+to_s.call(path[0])
+	var fd: Vector3=(to_s.call(path[1]) as Vector3).normalized()
+	var nd: Vector3=(to_s.call(path[2]) as Vector3).normalized()
+	var hb:=_wframe(fd,nd)*_wframe(_wipe_rest.f,_wipe_rest.n).transposed()*(_wipe_rest.b as Basis)
+	var bones:=[8,9,10]+_wipe_fingers
+	var saved:={}
+	for b in bones: saved[b]=sk.get_bone_pose_rotation(b)
+	var saved_pos:=sk.get_bone_pose_position(8)
+	# Rameno je za objektivem mimo záběr: smí se přisunout, aby ruka dosáhla až na hledí.
+	var s0:=bone_pose(8).origin
+	var reach:=s0.distance_to(bone_pose(9).origin)+bone_pose(9).origin.distance_to(bone_pose(10).origin)
+	var need:=s0.distance_to(target)-reach*0.95
+	if need>0.0:
+		sk.set_bone_pose_position(8,bone_pose(7).affine_inverse()*(s0+(target-s0).normalized()*minf(need,0.3)))
+	var w_keep:=weight
+	var sock_keep:=_socket_mode
+	weight=1.0
+	_socket_mode=false
+	solve_arm(8,9,10,target+hb*_raw_grip_offset(10),eye+to_s.call(Vector3(-0.6,-0.5,-0.05)),hb)
+	weight=w_keep
+	_socket_mode=sock_keep
+	# prsty u sebe, skoro natažené (dlaň přitlačená na sklo)
+	for b in _wipe_fingers:
+		var q:=sk.get_bone_rest(b).basis.get_rotation_quaternion()
+		if _wipe_spread.has(b): q=q*Quaternion(Vector3.BACK,float(_wipe_spread[b]))
+		sk.set_bone_pose_rotation(b,q*Quaternion(Vector3.RIGHT,_wipe_curl(sk.get_bone_name(b))))
+	# prolnutí s tím, co ruka dělala předtím (zbraň / volná ruka)
+	for b in bones: sk.set_bone_pose_rotation(b,(saved[b] as Quaternion).slerp(sk.get_bone_pose_rotation(b),w))
+	sk.set_bone_pose_position(8,saved_pos.lerp(sk.get_bone_pose_position(8),w))
+	var hand:=bone_pose(10).origin
+	var m1:=bone_pose(_wipe_rest.m1).origin
+	var m2:=bone_pose(_wipe_rest.m2).origin
+	var m3:=bone_pose(_wipe_rest.m3).origin
+	wipe_wrist=S*hand
+	wipe_palm=S*hand.lerp(m1,0.7)
+	wipe_tip=S*(m3+(m3-m2)*1.6)
+	wipe_contact=1.0 if (wipe>0.33 and wipe<0.72) else 0.0
 	_pose_skeleton=null
 
 func pose_skeleton() -> Skeleton3D:

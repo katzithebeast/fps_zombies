@@ -7,6 +7,7 @@ var player: Player
 var out_dir:="/tmp/fp"
 var frame:=0
 var shots:={}     # frame -> name
+var visor: Node=null   # VISOR=1: hledí helmy (scripts/visor.gd)
 
 func _initialize() -> void: call_deferred("run")
 
@@ -89,6 +90,16 @@ func run() -> void:
 		bc.set_enabled(true)
 		if OS.get_environment("VHS")!="": pm.set_shader_parameter("vhs",1.0)
 		stub.settings["bodycam_blur"]=float(OS.get_environment("BLUR")) if OS.get_environment("BLUR")!="" else 1.0
+	if OS.get_environment("VISOR")!="":
+		var vstub: Node=load("res://tools/_bc_stub.gd").new()
+		root.add_child(vstub)
+		vstub.player=player
+		var vlayer:=CanvasLayer.new(); vlayer.layer=11; root.add_child(vlayer)
+		visor=load("res://scripts/visor.gd").new()
+		vstub.add_child(visor)
+		visor.setup(vstub,vlayer,player)
+		visor.set_enabled(true)
+		visor.auto_wipe=OS.get_environment("VAUTO")!=""
 	player.teleport(Vector3(0,0.05,8),0.0,0.0)
 	var wpn: Node=player.weapon
 	for g in wpn.ORDER: wpn.give(g,false)
@@ -152,6 +163,20 @@ func run() -> void:
 				"melee":
 					key(KEY_Q,true); await step(0.05); key(KEY_Q,false)
 					await step(0.9,[0.05,0.13,0.2,0.3,0.42,0.55],nm)
+				"dirty","wipe":
+					# VISOR: krev + kapky na hledí, pak (wipe) otření levou rukou
+					visor.clear()
+					visor._add_splat(Vector2(0.42,0.42),0.55,0,0.9)
+					visor._add_splat(Vector2(0.7,0.55),0.85,6,0.9,0.3)
+					visor._add_splat(Vector2(0.25,0.7),0.3,3,0.8)
+					visor._wet=1.0; visor._wet_k=float(visor._wipes); visor._wet_seed=3.0; visor._wet_t=visor._now-1.5
+					if OS.get_environment("VFOG")!="": visor._exert=1.0
+					await step(0.3,[0.25],nm+"_0")
+					if s=="wipe":
+						visor.wipe()
+						var caps:=[]
+						for ph in [0.1,0.22,0.3,0.36,0.44,0.52,0.6,0.68,0.76,0.9,1.05,1.3]: caps.append(ph)
+						await step(1.4,caps,nm)
 				"draw":
 					var other:="mp40" if g!="mp40" else "ak"
 					wpn.switch_to(other); await step(1.5)

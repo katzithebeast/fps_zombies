@@ -26,6 +26,7 @@ var tile_mat: ShaderMaterial
 var water_mat: ShaderMaterial
 var post_mat: ShaderMaterial
 var bodycam: Node            # BODYCAM (experiment): scripts/bodycam.gd
+var visor: Node              # VISOR (experiment): scripts/visor.gd – hledí helmy, otření klávesou H
 var chrome_mat: StandardMaterial3D
 # Paleta místnosti: nahrazuje výchozí barvy dlaždic (každá síň má vlastní charakter).
 var _palette := {}
@@ -85,7 +86,7 @@ var settings := {
 	"preset": 2, "gi": true, "ssr": true, "planar": 1, "volumetric": true, "dust": true, "shadows": 3, "ao": true,
 	"bloom": 0.3, "dof": true, "grain": 0.35, "vignette": 0.5,
 	"mouse": 1.0, "bob": 1.0, "gun_sway": 1.0, "aim_sway": 0.1, "shake": 1.0, "vhs": false, "fisheye": false, "volume": 0.8, "music": 0.35, "flash_size": 30.0, "flash_flicker": true, "horror": false, "intro": true, "mini_range": 20.0, "mini_size": 300.0, "mini_pos": 0, "mini_line": 2, "mini_margin": 110.0, "recoil": 1.0, "gun_master": 0.0, "gun_bass": 0.0, "gun_echo": 1.0, "gun_ak_vol": 0.0, "gun_ak_bass": 0.0, "gun_ak_echo": 0.35, "gun_ak_pitch": 1.0, "gun_mp40_vol": 0.0, "gun_mp40_bass": 0.0, "gun_mp40_echo": 0.35, "gun_mp40_pitch": 1.0, "gun_izh54_vol": 0.0, "gun_izh54_bass": 0.0, "gun_izh54_echo": 0.35, "gun_izh54_pitch": 1.0, "gun_deagle_vol": 0.0, "gun_deagle_bass": 0.0, "gun_deagle_echo": 0.35, "gun_deagle_pitch": 1.0,
-	"fisheye_strength": 0.35, "bodycam": false, "bodycam_blur": 1.0, "contrast": 1.0, "gamma": 1.0, "camera_motion": 0.65,
+	"fisheye_strength": 0.35, "bodycam": false, "bodycam_blur": 1.0, "visor": false, "visor_auto": true, "contrast": 1.0, "gamma": 1.0, "camera_motion": 0.65,
 	"resolution_scale": 100.0, "fps_limit": 0, "rays_strength": 1.0,
 	"perspective": 0, "tp_distance": 2.8, "tp_offset": 0.5, "tp_height": 1.45,
 	"tp_side": 0, "tp_fov": 70.0, "tp_smoothing": 0.55,
@@ -391,6 +392,10 @@ func apply_setting(key: String) -> void:
 			fisheye_on = v
 		"bodycam":      # BODYCAM (experiment)
 			if bodycam: bodycam.set_enabled(bool(v))
+		"visor":        # VISOR (experiment)
+			if visor: visor.set_enabled(bool(v))
+		"visor_auto":   # VISOR (experiment)
+			if visor: visor.auto_wipe = bool(v)
 		"volume":
 			AudioServer.set_bus_volume_db(0, linear_to_db(maxf(float(v), 0.0001)))
 		"music":
@@ -3125,12 +3130,16 @@ func _setup_ui() -> void:
 	add_child(bodycam)
 	bodycam.setup(self, rect, post_mat)
 	player.cam_fx = bodycam
+	# VISOR (experiment): hledí helmy jde před bodycam i běžný postproces
+	visor = load("res://scripts/visor.gd").new()
+	add_child(visor)
+	visor.setup(self, post_layer, player)
 
 	# nápověda a hlášky (nad postprocesem)
 	var ui := CanvasLayer.new()
 	ui.layer = 20
 	add_child(ui)
-	_help = _label(ui, "WASD  pohyb        Shift  běh        Mezerník  skok\nC / Ctrl  přikrčit se a plazit\nP  první / třetí osoba        Q  změna ramene\nR  přebít AK / otočit neozbrojenou postavu        N (držet)  prohlédnout zbraň\nE  sebrat AK        Levé tlačítko  střelba        Pravé  míření\nQ / kolečko myši  úder pažbou        Shift  sprint (sklopí zbraň)\nF  svítilna        V  VHS kamera        G  rybí oko        B  bodycam (experiment)        M / Tab  mapa (držet)\nI  inventář        1–5  rychlý panel (nastav v inventáři)   kolečko  další zbraň\nT  zahodit, co máš v ruce (v inventáři Shift + pravé tlačítko nebo přetáhnout mimo)\nZ  přivolat zombie na zkoušku        X  uklidit zombie\nEsc  menu a nastavení (záložka Testování)", 20, Color(1, 1, 1, 0.92))
+	_help = _label(ui, "WASD  pohyb        Shift  běh        Mezerník  skok\nC / Ctrl  přikrčit se a plazit\nP  první / třetí osoba        Q  změna ramene\nR  přebít AK / otočit neozbrojenou postavu        N (držet)  prohlédnout zbraň\nE  sebrat AK        Levé tlačítko  střelba        Pravé  míření\nQ / kolečko myši  úder pažbou        Shift  sprint (sklopí zbraň)\nF  svítilna        V  VHS kamera        G  rybí oko        B  bodycam (experiment)        H  otřít hledí (experiment)        M / Tab  mapa (držet)\nI  inventář        1–5  rychlý panel (nastav v inventáři)   kolečko  další zbraň\nT  zahodit, co máš v ruce (v inventáři Shift + pravé tlačítko nebo přetáhnout mimo)\nZ  přivolat zombie na zkoušku        X  uklidit zombie\nEsc  menu a nastavení (záložka Testování)", 20, Color(1, 1, 1, 0.92))
 	_help.position = Vector2(28, 22)
 	_fps = _label(ui, "", 18, Color(1, 1, 1, 0.7))
 	var perf: CanvasLayer = load("res://scripts/perf_monitor.gd").new()
@@ -3210,6 +3219,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif flashlight:
 				flashlight.visible = not flashlight.visible
 				sfx.play("tick", -6.0, 1.5 if flashlight.visible else 1.1)
+		KEY_H:      # VISOR (experiment): otřít hledí
+			if visor and visor.enabled:
+				visor.wipe()
+			else:
+				toast("Hledí helmy je vypnuté (Nastavení → Kamera, experiment)")
 		KEY_B:      # BODYCAM (experiment)
 			settings["bodycam"] = not settings["bodycam"]
 			_on_setting_changed("bodycam")
@@ -3312,6 +3326,7 @@ func _strike_effects(victim: Node3D, bone: int, point: Vector3, direction: Vecto
 	var region: String=victim._region(bone)
 	sfx.play_at("hit_flesh",point,-1.0 if melee else -4.0,randf_range(0.9,1.15))
 	_combat_fx().blood(point,direction,lethal and not was_dead)
+	if visor and own and not was_dead: visor.on_strike(point, direction, lethal, melee)      # VISOR (experiment)
 	if own and not was_dead:
 		# Značka zásahu a body jen za vlastní rány do živé zombie; červená při zabití.
 		_hit_marker(lethal,region=="head")
@@ -3610,6 +3625,9 @@ func _run_test() -> void:
 	if _test.has("bodycam"):      # BODYCAM (experiment)
 		settings["bodycam"] = true
 		apply_setting("bodycam")
+	if _test.has("visor"):        # VISOR (experiment)
+		settings["visor"] = true
+		apply_setting("visor")
 	if _test.has("gun"):
 		player.weapon.give(String(_test["gun"]), true)
 	_fade_rect.color.a = 0.0

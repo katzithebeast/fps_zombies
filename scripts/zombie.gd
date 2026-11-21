@@ -19,23 +19,28 @@ const TYPES:={
 static var _scaled_anims:={}
 
 static func _anims_for(hips: float) -> AnimationLibrary:
-	if hips==1.0: return ANIMS
 	if _scaled_anims.has(hips): return _scaled_anims[hips]
+	# Klipy z Mixama + vstávání ze země (bake_getup.gd); u dítěte se zmenší poloha pánve.
 	var lib:=AnimationLibrary.new()
-	for name in ANIMS.get_animation_list():
-		var a: Animation=ANIMS.get_animation(name).duplicate(true)
-		for t in a.get_track_count():
-			if a.track_get_type(t)!=Animation.TYPE_POSITION_3D: continue
-			if not String(a.track_get_path(t)).ends_with("mixamorig_Hips"): continue
-			for key in a.track_get_key_count(t):
-				a.track_set_key_value(t,key,(a.track_get_key_value(t,key) as Vector3)*hips)
-		lib.add_animation(name,a)
+	for source: AnimationLibrary in [ANIMS,GETUP]:
+		for name in source.get_animation_list():
+			var a: Animation=source.get_animation(name)
+			if hips!=1.0:
+				a=a.duplicate(true)
+				for t in a.get_track_count():
+					if a.track_get_type(t)!=Animation.TYPE_POSITION_3D: continue
+					if not String(a.track_get_path(t)).ends_with("mixamorig_Hips"): continue
+					for key in a.track_get_key_count(t):
+						a.track_set_key_value(t,key,(a.track_get_key_value(t,key) as Vector3)*hips)
+			lib.add_animation(name,a)
 	_scaled_anims[hips]=lib
 	return lib
 static var _renamed:={}
 var kind:="classic"
 var react_mult:=1.0
 const ANIMS:=preload("res://assets/zombie/zombie_anims.res")
+const GETUP:=preload("res://assets/zombie/getup_anims.res")
+const RISE_BLEND:=0.45           # jak dlouho se ležící ragdoll prolíná do první pózy vstávání (s)
 const GibScript:=preload("res://scripts/zombie_gib.gd")
 const MULTIPLIER:={"head":4.0,"torso":1.0,"arm":0.6,"leg":0.75}
 const TRANSFER:={"head":0.6,"torso":1.0,"arm":0.65,"leg":0.8}
@@ -81,6 +86,9 @@ var simulator: PhysicalBoneSimulator3D
 var _ragdolled:=false          # pád z galerie jako hadrová panenka, pak se zvedne
 var _rag_t:=0.0
 var _rag_rise:=false
+var _rise_clip:=""               # getup_front / getup_back; prázdné = jen prolnutí do idle (plazivec)
+var _rise_len:=0.0
+var _rise_speed:=1.0             # každá zombie vstává trochu jinak rychle, dav se nesynchronizuje
 var keep_corpse:=false            # mrtvola jako kulisa: nezmizí
 var _sleeping:=false
 var _sleep_frozen:=false              # leží jako mrtvá, dokud hráč nepřijde blízko
@@ -619,43 +627,92 @@ func _update_ragdoll(dt: float) -> void:
 			if sim: sim.add_impulse(Vector2(spot.x,spot.z),0.6,-1.6)
 			if sfx: sfx.play_at("splash_big",spot,-5.0,0.9)
 		return
+	if _rise_clip!="":
+		# Vstávání: ragdoll se během RISE_BLEND prolne do prvního snímku klipu, pak už hraje jen animace.
+		if simulator.active:
+			var kr:=clampf(_rag_t/RISE_BLEND,0.0,1.0)
+			simulator.influence=1.0-smoothstep(0.0,1.0,kr)
+			if kr>=1.0: _rag_bodies_off()
+		_animation.advance(dt*_rise_speed)
+		if _rag_t*_rise_speed>=_rise_len-0.01:
+			_rise_clip=""
+			_blocker.collision_layer=128
+			_ragdolled=false
+			_stagger=0.25
+			set_meta("splashed",false)
+			_play("idle",1.0)
+		return
 	# Zvedání: ragdoll póza plynule přechází do animace.
 	var k:=clampf((_rag_t)/1.1,0.0,1.0)
 	simulator.influence=1.0-smoothstep(0.0,1.0,k)
 	_animation.advance(dt)
 	if k>=1.0:
-		simulator.physical_bones_stop_simulation()
-		simulator.active=false
-		simulator.influence=1.0
-		for body in bodies.values():
-			body.collision_layer=0
-			body.linear_damp=0.03
-			body.angular_damp=0.25
+		_rag_bodies_off()
 		_blocker.collision_layer=128
 		_ragdolled=false
 		_stagger=0.4
 		set_meta("splashed",false)
 
+func _rag_bodies_off() -> void:
+	simulator.physical_bones_stop_simulation()
+	simulator.active=false
+	simulator.influence=1.0
+	for body in bodies.values():
+		body.collision_layer=0
+		body.linear_damp=0.03
+		body.angular_damp=0.25
+
+func _rag_bone(name: String) -> Vector3:
+	# Poloha kosti podle ležícího tělesa ragdollu.
+	var body: PhysicalBone3D=bodies[_ids[name]]
+	return (body.global_transform*body.body_offset.affine_inverse()).origin
+
 func _begin_rise(hips: PhysicalBone3D) -> void:
 	_rag_rise=true
 	_rag_t=0.0
+	_rise_clip=""
 	# Kořen postavy přesunout pod pánev a natočit podle těla; tělesa zůstanou, kde leží.
 	var keep:={}
 	for id in bodies: keep[id]=bodies[id].global_transform
 	var at:=hips.global_position
 	var ground:=_ray(at+Vector3.UP*0.5,at+Vector3.DOWN*4.0)
 	var floor_y: float=ground.position.y if not ground.is_empty() else global_position.y
-	var forward:=hips.global_basis.z
-	forward.y=0
-	global_position=Vector3(at.x,floor_y,at.z)
-	if forward.length()>0.1: rotation.y=atan2(forward.x,forward.z)
+	var parts_ok:=true
+	for n in ["Hips","Head","LeftArm","RightArm"]:
+		if not _ids.has(n) or not bodies.has(_ids[n]): parts_ok=false
+	if parts_ok and not crawling and floor_y>_wl()-DEEP:
+		# Leží na břiše, nebo na zádech? Osa ramen × páteř = kam míří hrudník.
+		var spine:=_rag_bone("Head")-_rag_bone("Hips")
+		var chest:=(_rag_bone("LeftArm")-_rag_bone("RightArm")).cross(spine)
+		_rise_clip="getup_front" if chest.y<0.0 else "getup_back"
+		# Klip leží podél osy Z: na břiše hlavou dopředu, na zádech nohama dopředu.
+		var along:=Vector3(spine.x,0.0,spine.z)*(1.0 if _rise_clip=="getup_front" else -1.0)
+		if along.length()>0.05: rotation.y=atan2(along.x,along.z)
+		global_position=Vector3(at.x,floor_y,at.z)
+		var anim:=_animation.get_animation("z/"+_rise_clip)
+		var track:=anim.find_track(NodePath("Skeleton3D:mixamorig_Hips"),Animation.TYPE_POSITION_3D)
+		# Pánev v prvním snímku klipu přesně tam, kde leží pánev ragdollu.
+		var hip0: Vector3=skeleton.global_transform*(anim.track_get_key_value(track,0) as Vector3)
+		var shift:=_rag_bone("Hips")-hip0
+		global_position+=Vector3(shift.x,0.0,shift.z)
+		_rise_len=anim.length
+		_rise_speed=randf_range(0.88,1.15)*(0.85 if kind=="alpha" else 1.0)
+		_clip=_rise_clip
+		_clip_speed=1.0
+		_animation.play("z/"+_rise_clip,0.0)
+		_animation.seek(0.0,true)
+	else:
+		var forward:=hips.global_basis.z
+		forward.y=0
+		global_position=Vector3(at.x,floor_y,at.z)
+		if forward.length()>0.1: rotation.y=atan2(forward.x,forward.z)
 	for id in bodies:
 		bodies[id].global_transform=keep[id]
 		bodies[id].linear_velocity=Vector3.ZERO
 		bodies[id].angular_velocity=Vector3.ZERO
 		bodies[id].linear_damp=8.0
 		bodies[id].angular_damp=8.0
-	_play("idle",1.0)
+	if _rise_clip=="": _play("idle",1.0)
 
 func _land() -> void:
 	_drop=Vector3.ZERO

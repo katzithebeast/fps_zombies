@@ -75,7 +75,15 @@ func run() -> void:
 	var z: Node3D=preload("res://scripts/zombie.gd").new()
 	z.died.connect(func(_a,_b,_c): fx.pool(z))
 	if args.has("hp"): z.max_health=float(args["hp"]); z.health=z.max_health
+	if args.has("kind"): z.kind=String(args["kind"])
+	if args.has("yaw"): z.rotation.y=deg_to_rad(float(args["yaw"]))
 	root.add_child(z)
+	# --lie: leží jako mrtvola (--push=x,y,z = kam se skácí), --wake=T: v čase T vstane
+	if args.has("lie"):
+		z.lie_down()
+		if args.has("push"):
+			var pv:PackedStringArray=String(args["push"]).split(",")
+			for b in z.bodies.values(): (b as PhysicalBone3D).linear_velocity=Vector3(float(pv[0]),float(pv[1]),float(pv[2]))
 	if args.has("ai"):
 		var goal:=Node3D.new()
 		root.add_child(goal)
@@ -94,13 +102,23 @@ func run() -> void:
 	var next_shot:=0
 	var steps:=0
 	var last:=float(times[times.size()-1])
+	var wake_at:=float(args.get("wake","-1"))
 	while next_shot<times.size():
+		if wake_at>=0.0 and t>=wake_at:
+			wake_at=-1.0
+			z.wake()
 		while next_hit<hits.size() and t>=float(hits[next_hit])-0.0001:
 			var p:Vector3=z.skeleton.global_transform*z.bone_pose(bone).origin
 			z.hit(bone,p-dirn*0.1,dirn,1.0)
 			fx.blood(p,dirn,z.dead or z._death_pending)
 			next_hit+=1
 		if t>=float(times[next_shot])-0.0001:
+			if args.has("follow"):
+				# --follow=x,y,z: kamera v tomto odstupu od kořene zombie, míří na kořen
+				var fo:PackedStringArray=String(args["follow"]).split(",")
+				var at:Vector3=z.global_position+Vector3(0,0.45,0)
+				cam.global_position=at+Vector3(float(fo[0]),float(fo[1]),float(fo[2]))
+				cam.look_at(at)
 			z.set_physics_process(false)
 			PhysicsServer3D.set_active(false)
 			await RenderingServer.frame_post_draw
