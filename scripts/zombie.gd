@@ -63,7 +63,15 @@ static var knockdowns:=true          # pády po zásahu (testy je mohou vypnout)
 ## do animace. Rána tak působí stejnou fyzikou jako pád a přechod do ragdollu nebo zpět nemá švy.
 static var hit_physics:=true
 const HITRAG_TIME:=0.7
-const HITRAG_FADE:=0.14
+const HITRAG_FADE:=0.22
+## Rychlost, jakou rána nejvýš udělí části těla (m/s): kulka hne trupem, paží víc, ale nikdy ne
+## tak, aby se předloktí přetočilo za jeden snímek.
+const HIT_VMAX:={"torso":2.0,"head":3.4,"arm":3.0,"hand":3.2}
+## Stupně reakce podle síly rány v jednom snímku (poškození na střelu / 50 × síla, broky se sčítají):
+## lehká (MP40, broky z dálky) jen škubne, střední (AK) zbrzdí krok, těžká (Deagle, brokovnice
+## zblízka, úder) rozhodí nebo srazí.
+const TIER_MEDIUM:=0.9
+const TIER_HEAVY:=1.8
 const RISE_POSE:=0.4                 # vstávání: ležící tělo se nejdřív fyzikálně srovná do první pózy klipu
 static var death_anims:=true         # smrt animací před ragdollem
 const GibScript:=preload("res://scripts/zombie_gib.gd")
@@ -135,8 +143,15 @@ var _hitrag_fade:=-1.0
 var _hitrag_ids:=[]               # simulovaná tělesa (trup, hlava, paže)
 var _hitrag_slack:={}             # těleso -> čas povolení (zasažené místo krátce povolí)
 var _anim_prev:={}                # minulý cíl tělesa (rychlost animace pro tlumení)
+var _anim_prev_pos:={}
 var _pending_hits:=[]
+var _hitrag_want:=false
+var _hitrag_heavy:=0.0
+var _knock_want:=[]
+var _hitrag_fade_len:=HITRAG_FADE
 var _pending_spin:=[]
+var _frame_force:=0.0             # síla ran v tomto snímku (rozhoduje o stupni reakce)
+var _hitch:=0.0                   # zbrzdění chůze po ráně (0..1)
 var _kill_push:=Vector3.ZERO      # součet ran v posledním snímku (o smrti rozhoduje i brokovnice jako celek)
 var _push_frame:=-1
 var feeding:=false                # krmí se u těla (bite2), vyruší ho hráč nablízku, výstřel nebo zásah
@@ -468,6 +483,13 @@ func _physics_process_timed(dt: float) -> void:
 	_look(dt)
 	_update_reactions(dt)
 	if wall_guard: _keep_out_of_walls()
+	if not _knock_want.is_empty():
+		var kw: Array=_knock_want
+		_knock_want=[]
+		if _hitrag_want: _hitrag_activate()
+		_knockdown(kw[0],kw[1],kw[2],kw[3])
+		return
+	if _hitrag_want: _hitrag_activate()
 	if _hitrag_on: _update_hitrag(dt)
 	_sample_pose_motion(dt)
 	for area in hitboxes:
@@ -829,7 +851,9 @@ func _think(dt: float) -> void:
 	_wall_hold=maxf(0.0,_wall_hold-dt)
 	_velocity=Vector3.ZERO
 	_stagger=maxf(0.0,_stagger-dt)
-	_gait_factor=lerpf(_gait_factor,0.15 if _stagger>0.0 else 1.0,1.0-exp(-(24.0 if _stagger>0.0 else 7.0)*dt))
+	# zbrzdění kroku po ráně: plynule dolů i nahoru (žádné zaškobrtnutí animace)
+	_hitch=move_toward(_hitch,0.0,dt*1.8)
+	_gait_factor=lerpf(_gait_factor,1.0-_hitch,1.0-exp(-9.0*dt))
 	if _knock.length()>0.03:
 		_move(_knock*dt)
 		_knock*=exp(-9.0*dt)
@@ -988,7 +1012,9 @@ func hit(bone: int, point: Vector3, direction: Vector3, strength: float=1.0, dam
 	if frame_now!=_push_frame:
 		_push_frame=frame_now
 		_kill_push=Vector3.ZERO
+		_frame_force=0.0
 	_kill_push+=impulse
+	_frame_force+=damage/50.0*strength*(1.6 if flat else 1.0)
 	if dead:
 		if _death_anim!="":
 			# skácí se: další rána ho převezme do fyziky hned, ve směru střely
@@ -1033,21 +1059,28 @@ func hit(bone: int, point: Vector3, direction: Vector3, strength: float=1.0, dam
 	if _ragdolled:
 		_hit_while_down(bone,point,impulse,pd)
 		_react(bone,point,direction,strength*clampf(amount/40.0,0.85,1.8),region)
+	elif not _knock_want.is_empty():
+		# pád už je naplánovaný na tento snímek: další broky půjdou rovnou do padajícího těla
+		_pending_impacts.append([bone,point,impulse])
 	elif (lost_leg and _drop.is_zero_approx() and not swimming and _emerge<=0.0) or (knockdowns and _poise-pd<=0.0 and _can_fall()):
 		_poise=_poise_max*0.7
 		_poise_t=0.0
-		_knockdown(bone,point,impulse,region)
+		# pád se spustí v příštím fyzikálním kroku zombie hned po animaci (žádný zamrzlý snímek)
+		_knock_want=[bone,point,impulse,region]
+		_attack_left=0.0
 	else:
 		_poise-=pd
 		_poise_t=0.0
 		# Síla škubnutí podle skutečné rány: Deagle a brokovnice trhnou víc než samopal.
 		var physical:=hit_physics and region!="leg" and _hitrag_ok()
 		_react(bone,point,direction,strength*clampf(amount/40.0,0.85,1.8),region,not physical)
-		if physical: _hitrag_hit(bone,point,impulse*1.6*react_mult,region)
+		# fyzikální rána úměrná síle střely (MP40 < AK < Deagle; broky se sečtou v tělese)
+		if physical: _hitrag_hit(bone,point,direction*14.0*clampf(damage/50.0*strength,0.2,3.0)*float(TRANSFER[region])*1.25*react_mult,region)
 		if flat:
 			_stagger=0.7
 			_knock+=Vector3(direction.x,0,direction.z)*2.6
-		if (pd>=36.0 or _poise<_poise_max*0.4) and _can_fall() and _stagger_clip=="" and _stagger_cool<=0.0:
+		var heavy:=_frame_force>=TIER_HEAVY and region!="leg"
+		if (heavy or _poise<_poise_max*0.4) and _can_fall() and _stagger_clip=="" and _stagger_cool<=0.0:
 			_start_stagger(direction)
 	if not lost_leg and region=="arm" and float(_limb_damage[limb])>=limit:
 		_sever(side+"ForeArm",direction)
@@ -1084,12 +1117,23 @@ func _react(bone: int, point: Vector3, direction: Vector3, strength: float, regi
 	if procedural:
 		_reactions.append({"bone":bone,"direction":local_direction,"twist":twist,"region":region,"strength":minf(strength,2.0)*react_mult,"age":0.0,"upper":upper,"part":part})
 		if _reactions.size()>6: _reactions.pop_front()
-	_stagger=maxf(_stagger,float({"head":0.5,"torso":0.3,"leg":0.42,"arm":0.16}[region]))
-	# Zásah do těla nebo hlavy přeruší rozmáchnutí: palba má zastavovací účinek.
-	if _attack_left>0.0 and not _attack_hit and region!="arm": _attack_left=0.0
-	_knock+=Vector3(direction.x,0,direction.z)*float({"head":1.2,"torso":1.7,"leg":0.8,"arm":0.5}[region])*strength*react_mult*(0.3 if _stagger_clip!="" else 1.0)
+	# Stupeň rány: lehká jen škubne, střední zbrzdí krok, těžká zastaví. Posun kořene je malý
+	# (kořen ujíždí bez kroků = kloužou chodidla), velký posun dělá až vrávorání s kroky.
+	var tier:=clampf((_frame_force-0.3)/(TIER_HEAVY-0.3),0.0,1.0)
+	_stagger=maxf(_stagger,float({"head":0.5,"torso":0.3,"leg":0.42,"arm":0.16}[region])*lerpf(0.35,1.0,tier))
+	_hitch=maxf(_hitch,lerpf(0.2,0.75,tier)*(0.5 if region=="arm" else 1.0))
+	# Zásah do těla nebo hlavy přeruší rozmáchnutí, jen když je rána aspoň střední.
+	if _attack_left>0.0 and not _attack_hit and region!="arm" and _frame_force>=TIER_MEDIUM: _attack_left=0.0
+	_knock+=Vector3(direction.x,0,direction.z)*float({"head":1.2,"torso":1.7,"leg":0.8,"arm":0.5}[region])*minf(strength,1.0)*react_mult*lerpf(0.15,0.6,tier)*(0.3 if _stagger_clip!="" else 1.0)
 	# nervové škubnutí: náhodné osy pro paže a hlavu, doznívá ~0,6 s
 	if procedural: _reactions[-1]["spasm"]=[Vector3(randf_range(-1,1),randf_range(-1,1),randf_range(-1,1)).normalized(),Vector3(randf_range(-1,1),randf_range(-1,1),randf_range(-1,1)).normalized(),randf()*TAU]
+
+## Výchylka tlumené pružiny po úderu (normovaná na vrchol 1): sin náběh, exp útlum.
+static func _spring_env(age: float, omega: float, zeta: float) -> float:
+	var wd:=omega*sqrt(1.0-zeta*zeta)
+	var tp:=atan(wd/(zeta*omega))/wd
+	var peak:=exp(-zeta*omega*tp)*sin(wd*tp)
+	return exp(-zeta*omega*age)*sin(wd*age)/peak
 
 func _rotate_bone(bone: int, axis: Vector3, angle: float) -> void:
 	if bone<0 or axis.length_squared()<0.0001: return
@@ -1109,9 +1153,10 @@ func _update_reactions(dt: float) -> void:
 	var head: int=_ids["Head"]
 	for reaction in _reactions:
 		reaction.age+=dt
-		# Prudké škubnutí, pak tlumený návrat s malým překmitem; zásahy se sčítají.
+		# Odezva tlumené pružiny na úder: plynulý (ne skokový) náběh, vrchol ~0,1 s, malý překmit
+		# zpět a dozvuk. Zásahy se sčítají.
 		var age: float=reaction.age
-		var envelope: float=(1.0-exp(-age*38.0))*exp(-age*3.8)*(0.8+0.2*cos(age*10.0))*float(reaction.strength)*REACT_GAIN
+		var envelope: float=_spring_env(age,11.0,0.38)*float(reaction.strength)*REACT_GAIN
 		var direction: Vector3=reaction.direction
 		var bend:=Vector3.UP.cross(direction)
 		var twist: float=reaction.twist
@@ -1126,16 +1171,18 @@ func _update_reactions(dt: float) -> void:
 				var foot_hit: bool=String(reaction.part).ends_with("Foot")
 				# Krátký místní úlek předchází pomalejšímu podklesnutí. Stehno jde za
 				# impulzem, zásah lýtka zvlášť kopne bércem; koleno se neláme do stran.
-				var kick: float=(1.0-exp(-age*65.0))*exp(-age*9.0)*float(reaction.strength)*REACT_GAIN
+				var kick: float=_spring_env(age,13.0,0.42)*float(reaction.strength)*REACT_GAIN
+				var buckle: float=_spring_env(age,8.0,0.62)*float(reaction.strength)*REACT_GAIN
 				var limb: Vector3=(bone_pose(knee).origin-bone_pose(thigh).origin).normalized()
-				_rotate_bone(thigh,limb.cross(direction),kick*(0.24 if calf_hit or foot_hit else 0.65))
-				_rotate_bone(knee,Vector3.RIGHT,kick*(0.95 if calf_hit else 0.5 if foot_hit else 0.32)+envelope*0.16)
-				if foot_hit: _rotate_bone(foot,Vector3.RIGHT,kick*0.3)
+				_rotate_bone(thigh,limb.cross(direction),kick*(0.09 if calf_hit or foot_hit else 0.2))
+				_rotate_bone(knee,Vector3.RIGHT,kick*(0.3 if calf_hit else 0.18 if foot_hit else 0.12)+buckle*(0.22 if calf_hit else 0.12))
+				if foot_hit: _rotate_bone(foot,Vector3.RIGHT,kick*0.2)
 				# Váha krátce přejde na zdravou nohu. Trup reaguje méně než samotná končetina.
 				_rotate_bone(0,Vector3.FORWARD,envelope*(0.08 if side=="Left" else -0.08))
 				_rotate_bone(spine,bend,-envelope*0.06)
 				_rotate_bone(chest,Vector3.FORWARD,envelope*(-0.06 if side=="Left" else 0.06))
-				skeleton.set_bone_pose_position(0,skeleton.get_bone_pose_position(0)-Vector3.UP*envelope*0.055)
+				# koleno podklesne: pánev klesne a stočí se ke zraněné noze
+				skeleton.set_bone_pose_position(0,skeleton.get_bone_pose_position(0)-Vector3.UP*buckle*(0.085 if calf_hit else 0.05))
 			"arm":
 				var bone: int=reaction.bone
 				var limb: Vector3=bone_pose(bone).basis*bodies[bone].body_offset.origin
@@ -1223,6 +1270,7 @@ func _add_overlap_exceptions() -> void:
 func kill(point: Vector3, impulse: Vector3, bone: int) -> void:
 	if dead: return
 	var anim:=_pick_death(point,impulse,bone)
+	_knock_want=[]
 	dead=true
 	health=0
 	_rng.randomize()
@@ -1270,7 +1318,7 @@ func _ragdoll_death(point: Vector3, impulse: Vector3, bone: int) -> void:
 	simulator.physical_bones_start_simulation()
 	# Nejprve přenést VŠECHNA tělesa do aktuální pózy, pak vytvořit kotvy (už simulovaná nechat).
 	for id in bodies:
-		if not live.has(id): bodies[id].global_transform=(skeleton.global_transform*bone_pose(id)*bodies[id].body_offset).orthonormalized()
+		if not live.has(id): bodies[id].global_transform=_render_pose(id,live)
 	for id in bodies: _configure_joint(id,false)
 	_add_overlap_exceptions()
 	_pull_bodies_out_of_walls()
@@ -1320,7 +1368,7 @@ func _ragdoll_death(point: Vector3, impulse: Vector3, bone: int) -> void:
 ## Která smrt: zásah do hlavy, silná zbraň zblízka, běh, voda nebo uříznutá končetina = rovnou fyzika
 ## (padne jako podťatá). Jinak se často skácí animací – přes kolena, nebo zásah zepředu dozadu.
 func _pick_death(point: Vector3, impulse: Vector3, bone: int) -> String:
-	if not death_anims or keep_corpse or _ragdolled or _sleeping or feeding or _feed_rise_t>0.0: return ""
+	if not death_anims or keep_corpse or _ragdolled or not _knock_want.is_empty() or _sleeping or feeding or _feed_rise_t>0.0: return ""
 	if crawling or swimming or _is_low() or _emerge>0.0 or not _drop.is_zero_approx() or not _severed.is_empty(): return ""
 	var region:=_region(bone)
 	if region=="head" or maxf(impulse.length(),_kill_push.length())>17.0 or _velocity.length()>2.6 or (randf()>0.65 and force_death==""): return ""
@@ -1339,6 +1387,7 @@ func _update_death_anim(dt: float) -> void:
 	_animation.advance(dt*_clip_speed)
 	_update_reactions(dt)
 	if wall_guard: _keep_out_of_walls()
+	if _hitrag_want: _hitrag_activate()
 	if _hitrag_on: _update_hitrag(dt)
 	_sample_pose_motion(dt)
 	for area in hitboxes:
@@ -1377,7 +1426,7 @@ func _knockdown(bone: int, point: Vector3, impulse: Vector3, region: String) -> 
 	simulator.active=true
 	simulator.physical_bones_start_simulation()
 	for id in bodies:
-		if not live.has(id): bodies[id].global_transform=(skeleton.global_transform*bone_pose(id)*bodies[id].body_offset).orthonormalized()
+		if not live.has(id): bodies[id].global_transform=_render_pose(id,live)
 	for id in bodies: _configure_joint(id,false)
 	_add_overlap_exceptions()
 	_pull_bodies_out_of_walls()
@@ -1414,6 +1463,18 @@ func _knockdown(bone: int, point: Vector3, impulse: Vector3, region: String) -> 
 			if b: _pending_impacts.append([_ids[nm],b.global_position,flat*b.mass*(1.4 if nm=="Spine2" else 0.8)])
 	_say("zombie_attack",-6.0)
 
+## Póza tělesa tak, jak je právě vidět: animovaná kost, ale vůči už simulované pánvi
+## (nohy jsou při fyzikálním zásahu vykreslené od fyzikální pánve, ne od animované).
+func _render_pose(id: int, live: Array) -> Transform3D:
+	var body: PhysicalBone3D=bodies[id]
+	var anim_g:=skeleton.global_transform*bone_pose(id)
+	var hips: int=_ids.Hips
+	if live.has(hips) and id!=hips and _is_descendant(id,hips):
+		var hb: PhysicalBone3D=bodies[hips]
+		var phys_hips:=hb.global_transform*hb.body_offset.affine_inverse()
+		anim_g=phys_hips*(skeleton.global_transform*bone_pose(hips)).affine_inverse()*anim_g
+	return (anim_g*body.body_offset).orthonormalized()
+
 ## Rána do ležící / vstávající zombie: ležící tělo jen postrčí, vstávající může znovu srazit.
 func _hit_while_down(bone: int, point: Vector3, impulse: Vector3, pd: float) -> void:
 	if simulator.active and not _rag_rise:
@@ -1443,7 +1504,7 @@ func _start_stagger(direction: Vector3) -> void:
 	_knock=Vector3.ZERO
 	_clip=clip
 	_clip_speed=randf_range(0.95,1.18)
-	_animation.play("z/"+clip,0.08)
+	_animation.play("z/"+clip,0.18)
 	_animation.seek(0.0,true)
 
 func _root_at(t: float) -> Vector3:
@@ -1461,8 +1522,7 @@ func _update_stagger(dt: float) -> void:
 	if _stagger_t>=_stagger_len-0.02:
 		_stagger_clip=""
 		_stagger_cool=0.5
-		_clip=""
-		_play("idle",1.0)
+		_clip=""      # další krok _think vybere chůzi / běh / idle s vlastním prolnutím
 
 # ------------------------------------------------------------------ fyzikální zásah (aktivní ragdoll)
 
@@ -1481,20 +1541,24 @@ func _anim_globals() -> Array:
 
 ## Svaly táhnou tělesa k animaci (natočení ve světě, tlumení proti rychlosti animace).
 ## strength 1 = pevně drží animaci, 0 = volné. slack: tělesa, která právě povolila po ráně.
-func _drive_to_anim(ids: Array, strength: float, dt: float) -> void:
+func _drive_to_anim(ids: Array, strength: float, dt: float, linear:=false) -> void:
 	var G:=_anim_globals()
 	var sb:=skeleton.global_basis.orthonormalized()
 	for id in ids:
 		var body: PhysicalBone3D=bodies[id]
 		var target:=(sb*(G[id] as Transform3D).basis.orthonormalized()*body.body_offset.basis.orthonormalized()).orthonormalized()
+		var target_pos: Vector3=(skeleton.global_transform*(G[id] as Transform3D)*body.body_offset).origin
 		var w_anim:=Vector3.ZERO
 		if _anim_prev.has(id): w_anim=(_rotation_error(target,_anim_prev[id])/maxf(dt,0.001)).limit_length(12.0)
 		_anim_prev[id]=target
 		var region:=_region(id)
 		# trup drží pevně, hlava a paže volněji: po ráně se zhoupnou a doběhnou (setrvačnost)
-		var omega:=17.0 if region=="torso" else (11.0 if region=="head" else (8.5 if String(body.get_meta("part_name")).ends_with("Arm") else 9.5))
+		var pn:=String(body.get_meta("part_name"))
+		var omega:=17.0 if region=="torso" else (14.0 if region=="head" else (16.0 if pn.ends_with("Hand") else 13.0))
 		var tone:=strength
-		if _hitrag_slack.has(id): tone*=lerpf(0.04,1.0,smoothstep(0.05,0.3,_hitrag_t_since(id)))
+		if _hitrag_slack.has(id):
+			var sl: Array=_hitrag_slack[id]
+			tone*=lerpf(float(sl[2]),1.0,smoothstep(0.04,float(sl[1]),_time-float(sl[0])))
 		# PD na úrovni zrychlení (nezávislé na setrvačnosti, implicitní krok): stabilní i pro tenké
 		# končetiny, které mají kolem dlouhé osy setrvačnost několikrát menší
 		var st:=PhysicsServer3D.body_get_direct_state(body.get_rid())
@@ -1505,78 +1569,197 @@ func _drive_to_anim(ids: Array, strength: float, dt: float) -> void:
 		var acc:=(err*w*w-(body.angular_velocity-w_anim)*(c+w*w*dt))/(1.0+c*dt+w*w*dt*dt)
 		var torque:=(st.inverse_inertia_tensor.inverse()*acc).limit_length(260.0 if region=="torso" else 110.0)
 		PhysicsServer3D.body_apply_torque(body.get_rid(),torque)
+		if linear:
+			# Poloha každého tělesa taky k animaci (jinak by řetěz trupu a paží při chůzi postupně
+			# „odplaval“: svaly v kloubech neunesou setrvačnost celého řetězu za pánví).
+			var v_anim:=Vector3.ZERO
+			if _anim_prev_pos.has(id): v_anim=((target_pos-(_anim_prev_pos[id] as Vector3))/maxf(dt,0.001)).limit_length(8.0)
+			_anim_prev_pos[id]=target_pos
+			var wl:=omega*0.9*sqrt(maxf(tone,0.0))
+			var cl:=2.0*wl+1.0
+			var perr:=target_pos-body.global_position
+			var lacc:=(perr*wl*wl-(body.linear_velocity-v_anim)*(cl+wl*wl*dt))/(1.0+cl*dt+wl*wl*dt*dt)
+			PhysicsServer3D.body_apply_central_force(body.get_rid(),(lacc*body.mass).limit_length(body.mass*120.0))
 
-func _hitrag_t_since(id: int) -> float:
-	return _time-float(_hitrag_slack[id])
+## Povolit sval: [od kdy, za jak dlouho se vrátí, nejnižší napětí]
+func _slack(id: int, dur: float, low: float) -> void:
+	if not _hitrag_ids.has(id): return
+	if _hitrag_slack.has(id):
+		var old: Array=_hitrag_slack[id]
+		if _time-float(old[0])<float(old[1]): low=minf(low,float(old[2])); dur=maxf(dur,float(old[1])-(_time-float(old[0])))
+	_hitrag_slack[id]=[_time,dur,low]
+
+func _part(id: int) -> String:
+	return String(bodies[id].get_meta("part_name")) if bodies.has(id) else ""
 
 ## Rána: horní polovina těla přejde do fyziky (ve stejné póze a rychlosti jako animace – beze švu),
 ## rána do ní strčí v místě zásahu, svaly ji vrátí. Další rány jen prodlouží a přidají.
 func _hitrag_hit(bone: int, point: Vector3, impulse: Vector3, region: String) -> void:
-	if not _hitrag_on:
+	if not _hitrag_on and not _hitrag_want:
+		# zapne se až v příštím fyzikálním kroku zombie, hned po animaci: tělesa začnou přesně
+		# v póze, kterou animace právě vykreslí (jinak jeden snímek „zamrzne“ a pak poskočí)
+		_hitrag_want=true
 		_hitrag_ids.clear()
-		var names:=PackedStringArray()
 		for id in bodies:
-			var part: String=bodies[id].get_meta("part_name")
-			if _gone(id) or part=="Hips" or part.ends_with("Leg") or part.ends_with("Foot"): continue
-			_hitrag_ids.append(id)
-			names.append("mixamorig_"+part)
+			if not _gone(id): _hitrag_ids.append(id)
+	_hitrag_setup_hit(bone,point,impulse,region)
+
+func _hitrag_activate() -> void:
+	_hitrag_want=false
+	if _hitrag_on: return
+	var names:=PackedStringArray()
+	for id in _hitrag_ids: names.append("mixamorig_"+String(bodies[id].get_meta("part_name")))
+	if true:
 		var G:=_anim_globals()
 		for id in bodies:
 			var body: PhysicalBone3D=bodies[id]
 			body.global_transform=(skeleton.global_transform*(G[id] as Transform3D)*body.body_offset).orthonormalized()
+		# Pánev je taky simulovaná, ale řízená rychlostí přesně do animace (jako kinematická, jen
+		# bez zpoždění o snímek, které má kinematické těleso – trup by jinak táhl za starou pánví).
+		# Nohy zůstávají animované; jejich klouby k pánvi se po dobu zásahu vypnou.
 		for id in _hitrag_ids:
 			var body: PhysicalBone3D=bodies[id]
 			# kloub bez omezení: polohu drží kloub, natočení svaly podle animace (omezení počítaná
 			# z póze v okamžiku rány by animaci nedovolila dál ohnout loket ani trup)
 			body.joint_type=PhysicalBone3D.JOINT_TYPE_PIN
+			if _followed(id):
+				# pánev a nohy: přesně podle animace (vč. škubnutí nohou), bez kloubů a srážek
+				body.joint_type=PhysicalBone3D.JOINT_TYPE_NONE
+			# zápěstí: malé těleso, které by se kolem dlouhé osy volně protočilo – kužel s omezením
+			if String(body.get_meta("part_name")).ends_with("Hand"): _configure_joint(id,false)
 			body.collision_layer=0
-			body.collision_mask=1
+			body.collision_mask=0 if _followed(id) else 1
 			body.gravity_scale=0.0          # svaly drží proti tíze: v krátké ráně by jen strhávala paže dolů
 			body.linear_damp=0.4
 			body.angular_damp=1.2
 			body.linear_velocity=_velocity+Vector3(_pose_velocity.get(id,Vector3.ZERO))
 			body.angular_velocity=Vector3(_pose_spin.get(id,Vector3.ZERO))
 		_anim_prev.clear()
+		_anim_prev_pos.clear()
 		simulator.active=true
 		simulator.influence=1.0
 		simulator.physical_bones_start_simulation(names)
 		_hitrag_on=true
-	_hitrag_t=HITRAG_TIME
+
+func _hitrag_setup_hit(bone: int, point: Vector3, impulse: Vector3, region: String) -> void:
+	var heavy:=clampf((_frame_force-0.3)/(TIER_HEAVY-0.3),0.0,1.0)
+	_hitrag_heavy=heavy
+	_hitrag_t=lerpf(0.55,0.95,heavy)
 	_hitrag_fade=-1.0
 	simulator.influence=1.0
-	# zasažené místo a trup krátce povolí, ať rána tělem opravdu hne
-	for id in [bone,_ids.get("Spine2",-1),_ids.get("Spine",-1)]:
-		if _hitrag_ids.has(id): _hitrag_slack[id]=_time
-	if region=="head" and _ids.has("Neck"): _hitrag_slack[_ids.Neck]=_time
-	_pending_hits.append([bone,point,impulse])
-	# paže sebou při ráně škubnou (nervy), každá jinak
+	var part:=_part(bone)
+	var spine2: int=_ids.get("Spine2",-1)
+	var spine: int=_ids.get("Spine",-1)
+	var target:=bone
+	# Každé místo reaguje jinak (svaly na chvíli povolí, rána jde do správného tělesa):
+	if region=="arm":
+		# paže odletí ve směru střely a chvíli visí volně, trup se v rameni stočí
+		var side:="Left" if part.begins_with("Left") else "Right"
+		var upper:=part==side+"Arm"
+		for nm in ["Arm","ForeArm"]: _slack(_ids.get(side+nm,-1),lerpf(0.35,0.6,heavy),0.03 if nm=="ForeArm" or upper else 0.25)
+		_slack(spine2,0.25,0.45 if upper else 0.8)
+		if upper: _pending_hits.append([spine2,point,impulse*0.45])
+	elif region=="head":
+		# hlava cukne dozadu (krk povolí), trup ji o kus později následuje
+		_slack(_ids.get("Head",-1),lerpf(0.3,0.5,heavy),0.03)
+		_slack(_ids.get("Neck",-1),lerpf(0.3,0.5,heavy),0.05)
+		_slack(spine2,0.25,0.5)
+		_pending_hits.append([spine2,point,impulse*0.3])
+	else:
+		if part=="Hips" or part=="Spine":
+			# rána do břicha: tělo se kolem ní přeloží dopředu
+			target=spine
+			_slack(spine,lerpf(0.3,0.5,heavy),0.04)
+			_slack(spine2,lerpf(0.3,0.5,heavy),0.15)
+		else:
+			_slack(spine2,lerpf(0.25,0.45,heavy),0.04)
+			_slack(spine,lerpf(0.2,0.35,heavy),0.25)
+		# hlava a paže dobíhají setrvačností
+		for nm in ["Head","Neck","LeftArm","RightArm","LeftForeArm","RightForeArm"]: _slack(_ids.get(nm,-1),0.35,0.45)
+	_pending_hits.append([target,point,impulse,part=="Hips" or part=="Spine"])
+	# paže sebou při ráně škubnou (nervy), každá jinak; těžká rána víc
 	for nm in ["LeftForeArm","RightForeArm","LeftArm","RightArm","Head"]:
 		var id: int=_ids.get(nm,-1)
-		if _hitrag_ids.has(id): _pending_spin.append([id,Vector3(randf_range(-1,1),randf_range(-1,1),randf_range(-1,1))*(4.0 if nm.ends_with("ForeArm") else 2.2)])
+		if _hitrag_ids.has(id): _pending_spin.append([id,Vector3(randf_range(-1,1),randf_range(-1,1),randf_range(-1,1))*lerpf(1.5,3.0,heavy)*(1.4 if nm.ends_with("ForeArm") else 1.0)])
 
 func _update_hitrag(dt: float) -> void:
+	# rány do stejného tělesa v jednom snímku (broky) sečíst a omezit dohromady
+	var agg:={}
 	for h in _pending_hits:
-		var body: PhysicalBone3D=bodies.get(h[0])
-		if body==null or not _hitrag_ids.has(h[0]): body=bodies.get(_ids.get("Spine2",-1))
-		if body:
-			body.apply_impulse(h[2],(h[1]-body.global_position).limit_length(0.3))
-			# tělo se v ráně prohne (rotace kolem osy kolmé ke směru střely), i když kulka jde středem
-			var imp: Vector3=h[2]
-			var axis:=Vector3.UP.cross(imp.normalized())
-			if axis.length()>0.1: PhysicsServer3D.body_apply_torque_impulse(body.get_rid(),axis.normalized()*imp.length()*0.06)
+		var id: int=h[0]
+		if not _hitrag_ids.has(id): id=_ids.get("Spine2",-1)
+		if not bodies.has(id): continue
+		if not agg.has(id): agg[id]=[Vector3.ZERO,Vector3.ZERO,0.0,false]
+		var a: Array=agg[id]
+		a[0]=(a[0] as Vector3)+(h[2] as Vector3)
+		a[1]=(a[1] as Vector3)+(h[1] as Vector3)*(h[2] as Vector3).length()
+		a[2]=float(a[2])+(h[2] as Vector3).length()
+		a[3]=a[3] or (h.size()>3 and h[3])
 	_pending_hits.clear()
+	for id in agg:
+		var a: Array=agg[id]
+		var body: PhysicalBone3D=bodies[id]
+		var part:=_part(id)
+		var reg:="hand" if (part.ends_with("ForeArm") or part.ends_with("Hand")) else _region(id)
+		var point: Vector3=(a[1] as Vector3)/maxf(float(a[2]),0.0001)
+		# rána podle hmotnosti: lehké předloktí nesmí dostat stejný impulz jako trup; těžká zbraň víc
+		var imp: Vector3=(a[0] as Vector3).limit_length(body.mass*float(HIT_VMAX.get(reg,2.0))*(1.0+0.7*_hitrag_heavy))
+		body.apply_impulse(imp,(point-body.global_position).limit_length(0.3))
+		# tělo se v ráně prohne (rotace kolem osy kolmé ke směru střely), i když kulka jde středem;
+		# rána do břicha ho naopak přeloží dopředu; hlava cukne nejvíc
+		var axis:=Vector3.UP.cross(imp.normalized())
+		if axis.length()>0.1:
+			var st:=PhysicsServer3D.body_get_direct_state(body.get_rid())
+			var k:=0.32 if reg=="head" else (0.08 if reg=="torso" else 0.05)
+			var t_imp:=axis.normalized()*imp.length()*k*(-1.0 if a[3] else 1.0)
+			if st: t_imp=t_imp.limit_length((9.0+6.0*_hitrag_heavy)/maxf(st.inverse_inertia_tensor.get_scale().length()/1.732,0.001))
+			PhysicsServer3D.body_apply_torque_impulse(body.get_rid(),t_imp)
 	for sp in _pending_spin:
 		var b: PhysicalBone3D=bodies.get(sp[0])
 		if b: b.angular_velocity+=sp[1]
 	_pending_spin.clear()
-	_drive_to_anim(_hitrag_ids,1.0,dt)
+	var muscles:=[]
+	for id in _hitrag_ids:
+		if _followed(id): _follow_anim(id,dt)
+		else: muscles.append(id)
+	_drive_to_anim(muscles,1.0,dt,true)
+	for id in _hitrag_ids:
+		var b: PhysicalBone3D=bodies[id]
+		if b.angular_velocity.length()>16.0: b.angular_velocity=b.angular_velocity.limit_length(16.0)
 	_hitrag_t-=dt
-	if _hitrag_t<=0.0 and _hitrag_fade<0.0: _hitrag_fade=0.0
+	if _hitrag_t<=0.0 and _hitrag_fade<0.0:
+		# vracet do animace, až je tělo zpátky blízko pózy (nejvýš o 0,4 s později)
+		var far:=0.0
+		var G:=_anim_globals()
+		var sb:=skeleton.global_basis.orthonormalized()
+		for id in _hitrag_ids:
+			var b: PhysicalBone3D=bodies[id]
+			var tgt:=(sb*(G[id] as Transform3D).basis.orthonormalized()*b.body_offset.basis.orthonormalized()).orthonormalized()
+			far=maxf(far,_rotation_error(tgt,b.global_basis).length())
+		if far<0.2 or _hitrag_t<-0.4:
+			_hitrag_fade=0.0
+			# co zbývá dorovnat, dorovnat rychlostí nejvýš ~3 rad/s
+			_hitrag_fade_len=clampf(far/3.0,HITRAG_FADE,0.6)
 	if _hitrag_fade>=0.0:
 		# návrat do animace: fyzika už je skoro v animační póze, prolnutí jen dorovná zbytek
 		_hitrag_fade+=dt
-		simulator.influence=1.0-smoothstep(0.0,HITRAG_FADE,_hitrag_fade)
-		if _hitrag_fade>=HITRAG_FADE: _hitrag_stop()
+		simulator.influence=1.0-smoothstep(0.0,_hitrag_fade_len,_hitrag_fade)
+		if _hitrag_fade>=_hitrag_fade_len: _hitrag_stop()
+
+## Pánev a nohy při fyzikálním zásahu jen přesně sledují animaci (kinematické těleso by se
+## vykreslovalo o snímek pozadu – nohy by při každé ráně zaškobrtly).
+func _followed(id: int) -> bool:
+	var part:=_part(id)
+	return part=="Hips" or part.ends_with("Leg") or part.ends_with("Foot")
+
+## Těleso přesně do animační pózy během příštího kroku (rychlostí, ne teleportem).
+func _follow_anim(id: int, dt: float) -> void:
+	var body: PhysicalBone3D=bodies.get(id)
+	if body==null: return
+	var G:=_anim_globals()
+	var tgt:=(skeleton.global_transform*(G[id] as Transform3D)*body.body_offset).orthonormalized()
+	body.linear_velocity=(tgt.origin-body.global_position)/maxf(dt,0.001)
+	body.angular_velocity=_rotation_error(tgt.basis,body.global_basis)/maxf(dt,0.001)
 
 func _hitrag_restore(id: int) -> void:
 	var body: PhysicalBone3D=bodies[id]
@@ -1593,6 +1776,7 @@ func _hitrag_stop() -> void:
 	simulator.active=false
 	simulator.influence=1.0
 	for id in _hitrag_ids: _hitrag_restore(id)
+	for id in bodies: _configure_joint(id,false)
 	_hitrag_slack.clear()
 	_pending_hits.clear()
 	_pending_spin.clear()
@@ -1600,12 +1784,20 @@ func _hitrag_stop() -> void:
 ## Pád / smrt během fyzikálního zásahu: simulovaná tělesa zůstanou, jak jsou (poloha i rychlost),
 ## jen se jim vrátí tíha. Vrací jejich seznam.
 func _hitrag_take_over() -> Array:
+	if _hitrag_want:
+		# zásah se ještě nestihl zapnout: rány půjdou rovnou do ragdollu
+		_hitrag_want=false
+		for h in _pending_hits: _pending_impacts.append(h)
+		_pending_hits.clear()
+		_pending_spin.clear()
+		_hitrag_slack.clear()
 	if not _hitrag_on: return []
 	var live:=_hitrag_ids.duplicate()
 	_hitrag_on=false
 	for id in live:
 		bodies[id].gravity_scale=1.0
 		bodies[id].collision_mask=1|32
+		bodies[id].collision_layer=0
 	for h in _pending_hits: _pending_impacts.append(h)
 	_pending_hits.clear()
 	_pending_spin.clear()

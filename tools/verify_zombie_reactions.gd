@@ -35,13 +35,23 @@ func run() -> void:
 		check(lib.has_animation(a),"clip %s exists"%a)
 	check((lib.get_animation("stagger_back").get_meta("root_motion") as PackedVector3Array).size()>30,"stagger clip carries root motion")
 
-	# --- vrávorání: rána zepředu, dva kroky vzad, chodidla nekloužou
+	# --- jedna rána z AK jen škubne (žádný naučený klip), chůze pokračuje
 	var z:=spawn()
 	await wait(0.4)
 	var chest: int=z._ids.Spine2
-	var start: Vector3=z.global_position
 	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,50.0)
-	check(z._stagger_clip.begins_with("stagger_back"),"AK body hit from the front staggers back (%s)"%z._stagger_clip)
+	check(z._stagger_clip=="","single AK body hit only flinches (no canned stagger)")
+	z.queue_free()
+	# --- vrávorání: těžká rána (Deagle) zepředu, dva kroky vzad, chodidla nekloužou
+	z=spawn()
+	z.max_health=900.0
+	z._poise_max=300.0
+	z._poise=300.0
+	z.health=900.0
+	await wait(0.4)
+	var start: Vector3=z.global_position
+	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,130.0)
+	check(z._stagger_clip.begins_with("stagger_back"),"Deagle body hit from the front staggers back (%s)"%z._stagger_clip)
 	var slide:=0.0
 	var prev_r:=foot(z,"Right")
 	var prev_l:=foot(z,"Left")
@@ -64,7 +74,8 @@ func run() -> void:
 	z.max_health=400.0
 	z.health=400.0
 	await wait(0.4)
-	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,30.0)
+	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,50.0)
+	await physics_frame
 	check(z._hitrag_on,"body hit makes the upper body physical (active ragdoll)")
 	var peak:=0.0
 	var at_fade:=-1.0
@@ -73,7 +84,7 @@ func run() -> void:
 		var e:=anim_err(z,chest)
 		peak=maxf(peak,e)
 		if at_fade<0.0 and z._hitrag_fade>=0.0: at_fade=e
-	check(peak>12.0,"hit bends the chest physically (%.0f°)"%peak)
+	check(peak>11.0,"AK hit bends the chest physically (%.0f°)"%peak)
 	check(at_fade>=0.0 and at_fade<8.0,"muscles bring it back before fading out (%.1f° left)"%at_fade)
 	check(not z._hitrag_on and z.simulator.influence==1.0 and not z.simulator.active,"physics hands back to animation")
 	# pád během fyzikálního zásahu: simulovaný trup nesmí poskočit
@@ -88,8 +99,11 @@ func run() -> void:
 
 	# --- rána z boku
 	z=spawn(Vector3(4,0,0))
+	z._poise_max=300.0
+	z._poise=300.0
+	z.health=900.0
 	await wait(0.4)
-	z.hit(chest,z.bodies[chest].global_position,Vector3.RIGHT,1.0,50.0)
+	z.hit(chest,z.bodies[chest].global_position,Vector3.RIGHT,1.0,130.0)
 	check(z._stagger_clip.begins_with("stagger_left"),"bullet travelling +X pushes the zombie to its left (%s)"%z._stagger_clip)
 	z.queue_free()
 
@@ -99,6 +113,7 @@ func run() -> void:
 	var thigh: int=z._ids.LeftUpLeg
 	z.hit(thigh,z.bodies[thigh].global_position,Vector3.FORWARD,1.0,50.0)
 	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,50.0)
+	await physics_frame
 	check(z._ragdolled and z._knocked and not z.dead,"leg + body hit knocks the zombie down")
 	var head_y:=9.0
 	var t:=0.0
@@ -124,12 +139,14 @@ func run() -> void:
 	await wait(0.4)
 	z.hit(thigh,z.bodies[thigh].global_position,Vector3.FORWARD,1.0,50.0)
 	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,50.0)
+	await physics_frame
 	t=0.0
 	while not (z._rag_rise and not z.simulator.active) and t<6.0:
 		await physics_frame
 		t+=1.0/60.0
 	z.health=500.0
 	z.hit(chest,z.skeleton.global_transform*z.bone_pose(chest).origin,Vector3.FORWARD,1.0,50.0)
+	await physics_frame
 	check(z._knocked and not z._rag_rise,"heavy hit during the get-up knocks it down again")
 	z.queue_free()
 
@@ -170,6 +187,7 @@ func run() -> void:
 	await wait(0.3)
 	z.health=400.0
 	for i in 9: z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,0.45,36.0)
+	await physics_frame
 	check(z._knocked and not z.dead,"close shotgun blast knocks a tough zombie down")
 	z.queue_free()
 	z=spawn(Vector3(16,0,4))
