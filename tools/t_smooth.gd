@@ -91,6 +91,9 @@ func report(name: String) -> void:
 			var line: String=n+":"
 			for i in rot.size(): line+=" %.1f"%rot[i]
 			print(line)
+			line=n+" cm:"
+			for i in pos.size(): line+=" %.1f"%pos[i]
+			print(line)
 	worst.sort_custom(func(a,b): return a[0]>b[0])
 	var dv:=""
 	for n in DEV: dv+=" %s %d°"%[n,int(dev.get(n,0.0))]

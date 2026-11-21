@@ -35,12 +35,18 @@ func run() -> void:
 		check(lib.has_animation(a),"clip %s exists"%a)
 	check((lib.get_animation("stagger_back").get_meta("root_motion") as PackedVector3Array).size()>30,"stagger clip carries root motion")
 
-	# --- jedna rána z AK jen škubne (žádný naučený klip), chůze pokračuje
+	# --- samopal (MP40) jen škubne bez naučeného klipu; AK do těla smí udělat nejvýš jeden
+	# vrávoravý krok (zkrácený klip), chůze pokračuje
 	var z:=spawn()
 	await wait(0.4)
 	var chest: int=z._ids.Spine2
+	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,38.0)
+	check(z._stagger_clip=="","single MP40 body hit only flinches (no canned stagger)")
+	z.queue_free()
+	z=spawn()
+	await wait(0.4)
 	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,50.0)
-	check(z._stagger_clip=="","single AK body hit only flinches (no canned stagger)")
+	check(z._stagger_clip=="" or z._stagger_len<=0.5,"single AK body hit: at most one short stagger step (%.2f s)"%(z._stagger_len if z._stagger_clip!="" else 0.0))
 	z.queue_free()
 	# --- vrávorání: těžká rána (Deagle) zepředu, dva kroky vzad, chodidla nekloužou
 	z=spawn()
@@ -79,12 +85,12 @@ func run() -> void:
 	check(z._hitrag_on,"body hit makes the upper body physical (active ragdoll)")
 	var peak:=0.0
 	var at_fade:=-1.0
-	for i in 60:
+	for i in 150:
 		await physics_frame
 		var e:=anim_err(z,chest)
 		peak=maxf(peak,e)
 		if at_fade<0.0 and z._hitrag_fade>=0.0: at_fade=e
-	check(peak>11.0,"AK hit bends the chest physically (%.0f°)"%peak)
+	check(peak>14.0,"AK hit bends the chest physically, hard (%.0f°, plus trunk jolt)"%peak)
 	check(at_fade>=0.0 and at_fade<8.0,"muscles bring it back before fading out (%.1f° left)"%at_fade)
 	check(not z._hitrag_on and z.simulator.influence==1.0 and not z.simulator.active,"physics hands back to animation")
 	# pád během fyzikálního zásahu: simulovaný trup nesmí poskočit
