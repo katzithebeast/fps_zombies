@@ -585,7 +585,10 @@ func begin_reload(empty: bool=true) -> void:
 
 ## O kolik se oko při míření odtáhne od mířidel (dlouhá pažba IŽ-54 má pravou ruku u obličeje).
 func ads_pull() -> float:
+	if bodycam: return 0.0
 	return float(_gi().get("ads_pull",ADS_PULL))
+
+var bodycam:=false      # BODYCAM (experiment): kamera je na helmě nad okem -> při míření zbraň zůstane o kus níž
 
 static func _key(phase: float, keys: Array) -> Variant:
 	# Klíčové snímky [čas, hodnota] s měkkým přechodem.
@@ -974,7 +977,7 @@ func pose(dt: float, swimming: bool) -> void:
 	# a nezajíždí hráči do obličeje.
 	var pivot:=Vector3(0,head.y+0.08,head.z+0.06)
 	# Hloubka se počítá od hlavy (kamery): když se postava při chůzi předkloní, zbraň jde s ní a nevjede do obličeje.
-	var offset:=Vector3(head.x+lerpf(hip_pose.x,0.0,aim),head.y+lerpf(hip_pose.y,float(_gi().aim_y),aim),lerpf(hip_pose.z,0.25,aim)+(head.z-HEAD_REST_Z))
+	var offset:=Vector3(head.x+lerpf(hip_pose.x,0.0,aim),head.y+lerpf(hip_pose.y,float(_gi().aim_y)-(0.04 if bodycam else 0.0),aim),lerpf(hip_pose.z,0.25,aim)+(head.z-HEAD_REST_Z))
 	offset+=_inertia_offset*calm*(1.0-aim*0.9)+bob+breathe*calm+Vector3(-_sway.x,_sway.y,0)*0.6*calm+Vector3(-r_move.x,r_move.y,r_move.z)
 	offset+=Vector3(SPRINT_MOVE.x,SPRINT_MOVE.y,SPRINT_MOVE.z)*run+mel_move
 	# zpětný ráz (posun) + pohyb + vytažení zbraně

@@ -48,16 +48,19 @@ func dbg(name: String) -> void:
 func room() -> void:
 	var env:=Environment.new()
 	env.background_mode=Environment.BG_COLOR; env.background_color=Color(0.05,0.06,0.07)
-	env.ambient_light_source=Environment.AMBIENT_SOURCE_COLOR; env.ambient_light_color=Color(0.55,0.6,0.62); env.ambient_light_energy=0.55
+	var dark:=OS.get_environment("DARK")!=""
+	env.ambient_light_source=Environment.AMBIENT_SOURCE_COLOR; env.ambient_light_color=Color(0.55,0.6,0.62); env.ambient_light_energy=0.08 if dark else 0.55
 	env.tonemap_mode=Environment.TONE_MAPPER_FILMIC
 	var we:=WorldEnvironment.new(); we.environment=env; root.add_child(we)
-	var mat:=StandardMaterial3D.new(); mat.albedo_color=Color(0.32,0.42,0.42); mat.roughness=0.5
+	var mat:=ShaderMaterial.new()
+	mat.shader=Shader.new()
+	mat.shader.code="shader_type spatial;\nvarying vec3 wp;\nvoid vertex(){ wp=(MODEL_MATRIX*vec4(VERTEX,1.0)).xyz; }\nvoid fragment(){ vec3 g=abs(fract(wp*4.0+0.5)-0.5); float gl=1.0-smoothstep(0.0,0.025,min(min(g.x,g.y),g.z)); ALBEDO=mix(vec3(0.3,0.42,0.42),vec3(0.12,0.14,0.14),gl*0.8); ROUGHNESS=mix(0.25,0.7,gl); }"
 	var body:=StaticBody3D.new(); root.add_child(body)
 	for b in [[Vector3(0,-0.5,0),Vector3(8,1,30)],[Vector3(-3,1.5,0),Vector3(0.4,4,30)],[Vector3(3,1.5,0),Vector3(0.4,4,30)],[Vector3(0,3.3,0),Vector3(8,0.4,30)]]:
 		var cs:=CollisionShape3D.new(); var bs:=BoxShape3D.new(); bs.size=b[1]; cs.shape=bs; cs.position=b[0]; body.add_child(cs)
 		var mi:=MeshInstance3D.new(); var bm:=BoxMesh.new(); bm.size=b[1]; mi.mesh=bm; mi.position=b[0]; mi.material_override=mat; body.add_child(mi)
 	for z in [-2.0,-7.0,3.0]:
-		var l:=OmniLight3D.new(); l.position=Vector3(0.6,2.8,z); l.light_energy=2.2; l.omni_range=9.0; l.light_color=Color(1.0,0.86,0.68); l.shadow_enabled=true; root.add_child(l)
+		var l:=OmniLight3D.new(); l.position=Vector3(0.6,2.8,z); l.light_energy=2.2 if OS.get_environment("DARK")=="" else (1.6 if z<-5.0 else 0.0); l.omni_range=9.0; l.light_color=Color(1.0,0.86,0.68); l.shadow_enabled=true; root.add_child(l)
 
 func run() -> void:
 	out_dir=OS.get_environment("OUT") if OS.get_environment("OUT")!="" else "/tmp/fp"
@@ -69,6 +72,21 @@ func run() -> void:
 	Player.water_at=func(_p: Vector3) -> float: return -50.0
 	player=Player.new()
 	root.add_child(player)
+	if OS.get_environment("BODYCAM")!="":
+		var stub: Node=load("res://tools/_bc_stub.gd").new()
+		root.add_child(stub)
+		stub.player=player
+		stub.cam_attr=CameraAttributesPractical.new()
+		player.camera.attributes=stub.cam_attr
+		var layer:=CanvasLayer.new(); layer.layer=10; root.add_child(layer)
+		var rect:=ColorRect.new(); rect.set_anchors_preset(Control.PRESET_FULL_RECT); rect.size=Vector2(root.size); rect.mouse_filter=Control.MOUSE_FILTER_IGNORE
+		var pm:=ShaderMaterial.new(); pm.shader=load("res://shaders/post.gdshader"); rect.material=pm
+		layer.add_child(rect)
+		var bc: Node=load("res://scripts/bodycam.gd").new()
+		stub.add_child(bc)
+		bc.setup(stub,rect,pm)
+		player.cam_fx=bc
+		bc.set_enabled(true)
 	player.teleport(Vector3(0,0.05,8),0.0,0.0)
 	var wpn: Node=player.weapon
 	for g in wpn.ORDER: wpn.give(g,false)
@@ -85,6 +103,18 @@ func run() -> void:
 			match s:
 				"idle":
 					await step(1.0,[0.99],nm)
+				"turn":
+					# švihnutí myší doleva a zpátky (zpoždění kamery, rozmazání, rolling shutter)
+					for i in 12:
+						var mm:=InputEventMouseMotion.new(); mm.relative=Vector2(-55,0); Input.parse_input_event(mm)
+						await step(1.0/60.0,[0.0] if i in [4,8,11] else [],nm+"_%d"%i)
+					await step(0.5,[0.05,0.15,0.3],nm+"_after")
+				"look":
+					# malý pohyb myší: zbraň se pohne v okně, kamera zůstane (volné míření)
+					for i in 10:
+						var mm:=InputEventMouseMotion.new(); mm.relative=Vector2(12,-5); Input.parse_input_event(mm)
+						await step(1.0/60.0)
+					await step(0.6,[0.0,0.25,0.55],nm)
 				"walk":
 					key(KEY_W,true); await step(1.6,[1.0,1.15,1.3,1.45],nm); key(KEY_W,false); await step(0.8)
 				"sprint":

@@ -647,13 +647,15 @@ func shoot() -> void:
 	# Rána do mířidel: zbraň po výstřelu chvíli nemíří přesně tam, kam pohled (rozhodí další střelu).
 	_heat=minf(_heat+kick.y*0.35,0.05)
 	var camera:=player.camera
-	var origin:=camera.global_position
+	var aim_xf: Transform3D=camera.global_transform
+	if player.cam_fx and player.cam_fx.active(): aim_xf=player.cam_fx.aim_transform(player)   # BODYCAM: střela letí ve směru hlavně
+	var origin:=aim_xf.origin
 	damage=s.damage
 	# Každý brok (nebo jediná střela) letí náhodně uvnitř kužele rozptylu.
 	for pellet in int(s.pellets):
 		var angle:=randf()*TAU
 		var off:=tan(spread)*sqrt(randf())
-		var forward: Vector3=(-camera.global_basis.z+camera.global_basis.x*cos(angle)*off+camera.global_basis.y*sin(angle)*off).normalized()
+		var forward: Vector3=(-aim_xf.basis.z+aim_xf.basis.x*cos(angle)*off+aim_xf.basis.y*sin(angle)*off).normalized()
 		var query:=PhysicsRayQueryParameters3D.create(origin,origin+forward*100.0,1|32|64)
 		query.collide_with_areas=true
 		var hit:=player.get_world_3d().direct_space_state.intersect_ray(query)

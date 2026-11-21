@@ -33,6 +33,7 @@ var control_enabled := true
 var input_suspended := false       # multiplayer menu nepozastavuje svět ani síť
 var interaction_locked := false
 var sprint_lock := false               # střelba a míření ruší sprint
+var cam_fx: Node = null       # BODYCAM (experiment): scripts/bodycam.gd
 var handheld := 0.0            # 0..1 síla "ruční kamery" (VHS / fisheye režim ji zvedá)
 var base_fov := 75.0
 var auto_walk := Vector2.ZERO  # jen pro testy
@@ -455,6 +456,7 @@ func _process_timed(dt: float) -> void:
 	var fov_target := (shoulder_fov if camera_uses_third_person else base_fov) + (5.0 if (_sprint and speed > WALK + 0.5 and grounded) else 0.0)
 	fov_target=lerpf(fov_target,50.0 if not camera_uses_third_person else 55.0,weapon.aim_amount)
 	camera.fov = lerpf(camera.fov, fov_target, 1.0 - exp(-5.0 * dt))
+	if cam_fx and not camera_uses_third_person: cam_fx.apply_camera(self, dt)     # BODYCAM (experiment)
 	weapon.finish_frame()
 
 func _update_shoulder_camera(dt: float, feet: Vector3) -> void:

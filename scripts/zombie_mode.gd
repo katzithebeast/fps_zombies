@@ -1119,7 +1119,7 @@ func _process_timed(dt: float) -> void:
 	_update_tension()
 	_layout()
 	_layer.visible=not main.menu.is_open
-	_cross.visible=player.weapon.equipped and bool(main.settings.get("crosshair_on",false))
+	_cross.visible=player.weapon.equipped and bool(main.settings.get("crosshair_on",false)) and not (main.bodycam and main.bodycam.active())   # BODYCAM: volné míření bez zaměřovače
 	_cross.queue_redraw()
 	_pulse=maxf(0.0,_pulse-dt*1.9)
 	_update_damage_feedback(dt)
