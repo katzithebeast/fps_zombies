@@ -17,6 +17,12 @@ func spawn(at:=Vector3.ZERO) -> Node3D:
 func wait(t: float) -> void:
 	for i in int(t*60.0): await physics_frame
 
+func anim_err(z: Node3D, id: int) -> float:
+	var G: Array=z._anim_globals()
+	var body: PhysicalBone3D=z.bodies[id]
+	var tgt: Basis=(z.skeleton.global_basis*(G[id] as Transform3D).basis*body.body_offset.basis).orthonormalized()
+	return rad_to_deg((z._rotation_error(tgt,body.global_basis) as Vector3).length())
+
 func foot(z: Node3D, side: String) -> Vector3:
 	return z.skeleton.global_transform*z.bone_pose(z._ids[side+"Foot"]).origin
 
@@ -53,6 +59,33 @@ func run() -> void:
 	check(z._stagger_clip=="" and not z.dead,"stagger finishes and zombie carries on")
 	z.queue_free()
 
+	# --- fyzikální zásah: trup se prohne, svaly ho vrátí do animace a přechod zpět je bez skoku
+	z=spawn(Vector3(0,0,-6))
+	z.max_health=400.0
+	z.health=400.0
+	await wait(0.4)
+	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,30.0)
+	check(z._hitrag_on,"body hit makes the upper body physical (active ragdoll)")
+	var peak:=0.0
+	var at_fade:=-1.0
+	for i in 60:
+		await physics_frame
+		var e:=anim_err(z,chest)
+		peak=maxf(peak,e)
+		if at_fade<0.0 and z._hitrag_fade>=0.0: at_fade=e
+	check(peak>12.0,"hit bends the chest physically (%.0f°)"%peak)
+	check(at_fade>=0.0 and at_fade<8.0,"muscles bring it back before fading out (%.1f° left)"%at_fade)
+	check(not z._hitrag_on and z.simulator.influence==1.0 and not z.simulator.active,"physics hands back to animation")
+	# pád během fyzikálního zásahu: simulovaný trup nesmí poskočit
+	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,30.0)
+	await wait(0.1)
+	var before: Transform3D=z.bodies[chest].global_transform
+	var lin: Vector3=z.bodies[chest].linear_velocity
+	z._knockdown(chest,z.bodies[chest].global_position,Vector3.ZERO,"torso")
+	var after: Transform3D=z.bodies[chest].global_transform
+	check(before.origin.distance_to(after.origin)<0.001 and z.bodies[chest].linear_velocity.distance_to(lin)<0.001,"knockdown keeps the already physical chest exactly where and how it moves")
+	z.queue_free()
+
 	# --- rána z boku
 	z=spawn(Vector3(4,0,0))
 	await wait(0.4)
@@ -67,15 +100,23 @@ func run() -> void:
 	z.hit(thigh,z.bodies[thigh].global_position,Vector3.FORWARD,1.0,50.0)
 	z.hit(chest,z.bodies[chest].global_position,Vector3.FORWARD,1.0,50.0)
 	check(z._ragdolled and z._knocked and not z.dead,"leg + body hit knocks the zombie down")
-	await wait(1.6)
-	var head_y: float=(z.skeleton.global_transform*z.bone_pose(z._ids.Head).origin).y
-	check(head_y<0.7,"knocked zombie lies on the floor (head %.2f m)"%head_y)
+	var head_y:=9.0
 	var t:=0.0
+	var pose_in:=[]
 	while z._ragdolled and t<8.0:
 		await physics_frame
 		t+=1.0/60.0
+		if not z._rag_rise: head_y=minf(head_y,z.bodies[z._ids.Head].global_position.y)
+		if z._rag_rise and z._rise_clip!="" and z.simulator.active and pose_in.size()<2:
+			var at_t: float=z._rag_t
+			if (pose_in.size()==0 and at_t<0.12) or (pose_in.size()==1 and at_t>=0.38):
+				var sum:=0.0
+				for id in z.bodies: sum+=anim_err(z,id)
+				pose_in.append(snappedf(sum/z.bodies.size(),0.1))
+	check(head_y<0.7,"knocked zombie lies on the floor (head %.2f m)"%head_y)
 	head_y=(z.skeleton.global_transform*z.bone_pose(z._ids.Head).origin).y
 	check(not z._ragdolled and head_y>1.4,"zombie gets back up (%.1f s, head %.2f m)"%[t,head_y])
+	check(pose_in.size()==2 and pose_in[1]<pose_in[0]*0.85,"lying body is pulled into the get-up pose before blending (avg %s°)"%str(pose_in))
 	z.queue_free()
 
 	# --- rána do vstávající zombie ji znovu srazí
