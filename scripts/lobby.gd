@@ -45,6 +45,7 @@ func _ready() -> void:
 	_build_props()
 	_build_lamp()
 	_build_decals()
+	_build_papers()
 	_build_dust()
 	_build_sound()
 	_build_player()
@@ -66,12 +67,14 @@ func mat(key: String, meters: float, tint:=Color.WHITE, normal:=1.0) -> Standard
 	var id:="%s_%.2f_%s_%.2f"%[key,meters,tint.to_html(),normal]
 	if _mats.has(id): return _mats[id]
 	var m:=StandardMaterial3D.new()
-	m.albedo_texture=load(M+"mats/%s_albedo.jpg"%key)
+	var dir:=M+("" if key.begins_with("gen/") else "mats/")
+	m.albedo_texture=load(dir+"%s_albedo.jpg"%key)
 	m.albedo_color=tint
 	m.normal_enabled=true
-	m.normal_texture=load(M+"mats/%s_normal.jpg"%key)
+	m.normal_texture=load(dir+"%s_normal.jpg"%key)
 	m.normal_scale=normal
-	m.roughness_texture=load(M+"mats/%s_rough.jpg"%key)
+	if ResourceLoader.exists(dir+"%s_rough.jpg"%key): m.roughness_texture=load(dir+"%s_rough.jpg"%key)
+	else: m.roughness=0.9
 	m.roughness_texture_channel=BaseMaterial3D.TEXTURE_CHANNEL_RED
 	m.uv1_triplanar=true
 	m.uv1_world_triplanar=true
@@ -189,8 +192,8 @@ func _build_environment() -> void:
 # ------------------------------------------------------------------ místnost
 
 func _build_room() -> void:
-	var paint:=mat("peeling_paint",1.6)
-	var ceiling:=mat("peeling_paint",2.4,Color(1.3,1.22,1.12),0.25)
+	var paint:=mat("gen/paint_green",1.7,Color(1.04,0.97,0.9))
+	var ceiling:=mat("gen/plaster",1.9)
 	var tiles:=mat("ceramic_tiles",0.8,Color(0.97,0.97,0.94))
 	var floor_m:=mat("terrazzo",1.3)
 	var E:=W+T; var F:=D+T
@@ -243,11 +246,33 @@ func _build_window() -> void:
 	# sklo: lehce zašpiněné, nevrhá stín
 	var glass:=StandardMaterial3D.new()
 	glass.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
-	glass.albedo_color=Color(0.75,0.8,0.78,0.08)
-	glass.roughness=0.05
+	glass.albedo_texture=load(M+"gen/glass_dirty.png")
+	glass.albedo_color=Color(1,1,1,0.9)
+	glass.roughness=0.15
 	glass.metallic_specular=0.8
-	var g:=box(Vector3(WIN.size.x-0.08,WIN.size.y-0.08,0.008),Vector3((x0+x1)*0.5,(y0+y1)*0.5,zf),glass,false)
-	g.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	glass.cull_mode=BaseMaterial3D.CULL_DISABLED
+	for half in [[x0+0.06,(x0+x1)*0.5-0.025],[(x0+x1)*0.5+0.025,x1-0.06]]:
+		var g:=MeshInstance3D.new()
+		var q:=QuadMesh.new()
+		q.size=Vector2(half[1]-half[0],WIN.size.y-0.12)
+		g.mesh=q
+		g.material_override=glass
+		g.position=Vector3((half[0]+half[1])*0.5,(y0+y1)*0.5,zf)
+		g.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(g)
+	# výhled: protější křídlo sanatoria v západu slunce (kulisa, nevrhá stín, nesvítí)
+	var vm:=StandardMaterial3D.new()
+	vm.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
+	vm.albedo_texture=load(M+"gen/window_view.jpg")
+	vm.albedo_color=Color(1.15,1.1,1.05)
+	var view:=MeshInstance3D.new()
+	var vq:=QuadMesh.new()
+	vq.size=Vector2(24.0,12.0)
+	view.mesh=vq
+	view.material_override=vm
+	view.position=Vector3((x0+x1)*0.5+1.5,3.9,-D-14.0)
+	view.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(view)
 	# parapet
 	slab(Vector3(x0-0.06,y0-0.04,-D-0.06),Vector3(x1+0.06,y0+0.01,-D+0.07),mat("terrazzo",0.8,Color(1.15,1.15,1.15)),true)
 	# mříže zevnitř
@@ -292,8 +317,11 @@ func _build_door_and_corridor() -> void:
 			if mt and mt.resource_name.begins_with("glass"):
 				var gl:=StandardMaterial3D.new()
 				gl.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
-				gl.albedo_color=Color(0.72,0.76,0.72,0.6)
-				gl.roughness=0.55
+				gl.albedo_texture=load(M+"gen/glass_wired.png")
+				gl.uv1_triplanar=true
+				gl.uv1_world_triplanar=true
+				gl.uv1_scale=Vector3.ONE/0.5
+				gl.roughness=0.45
 				m.set_surface_override_material(i,gl)
 				m.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var blocker:=StaticBody3D.new()
@@ -356,7 +384,13 @@ func _aabb(n: Node3D) -> AABB:
 
 func _build_props() -> void:
 	# postel u západní zdi, čelo u okna
-	_place("bed",0.0095,-90.0,Vector3(0,0,-0.8),{"x_min":-W+0.04})
+	var bed:=_place("bed",0.0095,-90.0,Vector3(0,0,-0.8),{"x_min":-W+0.04})
+	var blanket:=mat("gen/blanket",0.55)
+	for mi in bed.find_children("*","MeshInstance3D",true,false):
+		var m: MeshInstance3D=mi
+		for i in m.mesh.get_surface_count():
+			var mt:=m.get_active_material(i)
+			if mt and mt.resource_name=="lagen": m.set_surface_override_material(i,blanket)
 	# polička nad postelí (slot na trofeje)
 	var wood:=mat("old_wood",0.9,Color(1.05,1.0,0.95))
 	box(Vector3(0.22,0.03,1.0),Vector3(-W+0.11,1.62,-0.8),wood)
@@ -393,8 +427,12 @@ func _build_props() -> void:
 	_sink_pos=_aabb(sink).get_center()
 	var sa:=_aabb(sink)
 	box(Vector3(0.5,0.62,0.03),Vector3(sa.get_center().x,sa.end.y+0.5,D-0.03),flat(Color(0.18,0.17,0.15),0.5),false)
-	var mirror:=flat(Color(0.95,0.96,0.95),0.07,1.0)
-	box(Vector3(0.44,0.56,0.01),Vector3(sa.get_center().x,sa.end.y+0.5,D-0.05),mirror,false)
+	var mirror:=StandardMaterial3D.new()
+	mirror.albedo_texture=load(M+"gen/mirror_albedo.jpg")
+	mirror.roughness_texture=load(M+"gen/mirror_rough.jpg")
+	mirror.roughness_texture_channel=BaseMaterial3D.TEXTURE_CHANNEL_RED
+	mirror.metallic=1.0
+	_quad(Vector2(0.44,0.56),Vector3(sa.get_center().x,sa.end.y+0.5,D-0.05),Vector3(0,0,-1),mirror)
 	var probe:=ReflectionProbe.new()
 	probe.position=Vector3(sa.get_center().x,1.6,1.2)
 	probe.size=Vector3(5.0,3.2,3.8)
@@ -453,8 +491,11 @@ func _build_lamp() -> void:
 # ------------------------------------------------------------------ špína, plíseň, praskliny
 
 func _decal(file: String, pos: Vector3, normal: Vector3, size: Vector2, rot:=0.0, alpha:=1.0) -> void:
+	_decal_file("decals/%s.png"%file,pos,normal,size,rot,alpha)
+
+func _decal_file(file: String, pos: Vector3, normal: Vector3, size: Vector2, rot:=0.0, alpha:=1.0) -> void:
 	var d:=Decal.new()
-	d.texture_albedo=load(M+"decals/%s.png"%file)
+	d.texture_albedo=load(M+file)
 	d.size=Vector3(size.x,0.2,size.y)
 	d.modulate=Color(1,1,1,alpha)
 	d.cull_mask=1
@@ -477,6 +518,65 @@ func _build_decals() -> void:
 	_decal("decal_grime_4_greasy_finger_drag",Vector3(DOOR.end.x+0.25,1.25,D),Vector3(0,0,-1),Vector2(0.4,0.4),0.0,0.8)
 	_decal("decal_grime_3_dusty_abrasion",Vector3(0.35,0.002,0.3),Vector3(0,1,0),Vector2(2.4,1.8),0.4,0.5)
 	_decal("decal_grime_1_dark_smear",Vector3(-1.4,0.002,1.5),Vector3(0,1,0),Vector2(1.3,0.8),0.0,0.6)
+	# velké nepravidelné zašpinění stěn (rozbije opakování textury)
+	var g:=[[Vector3(-1.6,2.3,-D),Vector3(0,0,1),Vector2(2.6,2.2)],[Vector3(1.6,2.5,-D),Vector3(0,0,1),Vector2(2.2,1.8)],
+		[Vector3(-W,2.2,0.4),Vector3(1,0,0),Vector2(3.0,2.2)],[Vector3(W,2.4,-0.8),Vector3(-1,0,0),Vector2(2.8,2.0)],
+		[Vector3(W,1.9,1.2),Vector3(-1,0,0),Vector2(1.6,2.0)],[Vector3(1.2,2.4,D),Vector3(0,0,-1),Vector2(2.6,2.0)],
+		[Vector3(-1.4,2.85,D),Vector3(0,0,-1),Vector2(2.0,1.2)],[Vector3(0.0,H,-0.5),Vector3(0,-1,0),Vector2(3.0,2.6)]]
+	for i in g.size(): _decal_file("gen/grunge_wall.png",g[i][0],g[i][1],g[i][2],float(i)*1.7,0.4 if i==g.size()-1 else 0.85)
+	# špína u podlahy podél všech zdí a v rozích
+	for w in [[Vector3(0,0.13,-D),Vector3(0,0,1),5.0],[Vector3(0,0.13,D),Vector3(0,0,-1),5.0],
+			[Vector3(-W,0.13,0),Vector3(1,0,0),3.8],[Vector3(W,0.13,0),Vector3(-1,0,0),3.8]]:
+		_decal_file("gen/dirt_floor_strip.png",w[0],w[1],Vector2(w[2],0.3),0.0,0.9)
+	for c in [Vector2(-W,-D),Vector2(W,-D),Vector2(-W,D),Vector2(W,D)]:
+		var n:=Vector3(-signf(c.x),0,-signf(c.y)).normalized()
+		_decal_file("gen/dirt_corner.png",Vector3(c.x,H*0.5,c.y),n,Vector2(0.35,H),0.0,0.9)
+
+## Plochý obdélník (papír, zrcadlo) natočený lícem ve směru `normal`, `roll` = pootočení v rovině.
+func _quad(size: Vector2, pos: Vector3, normal: Vector3, m: Material, roll:=0.0) -> MeshInstance3D:
+	var mi:=MeshInstance3D.new()
+	var q:=QuadMesh.new()
+	q.size=size
+	mi.mesh=q
+	mi.material_override=m
+	add_child(mi)
+	var z:=normal.normalized()
+	var y:=Vector3.UP if absf(z.dot(Vector3.UP))<0.95 else Vector3.FORWARD
+	var x:=y.cross(z).normalized()
+	y=z.cross(x)
+	mi.global_transform=Transform3D(Basis(x,y,z).rotated(z,roll),pos)
+	return mi
+
+func _paper(file: String, w: float, pos: Vector3, normal: Vector3, roll:=0.0) -> MeshInstance3D:
+	var t: Texture2D=load(M+"gen/"+file)
+	var m:=StandardMaterial3D.new()
+	m.albedo_texture=t
+	m.roughness=0.85
+	return _quad(Vector2(w,w*float(t.get_height())/float(t.get_width())),pos,normal,m,roll)
+
+func _build_papers() -> void:
+	# cedulka na dveřích (zevnitř) a dobové papíry na zdech
+	var door: Node3D=get_node_or_null("door")
+	var dz:=_aabb(door).position.z if door else D
+	_paper("sign_quarantine.jpg",0.42,Vector3(DOOR.get_center().x-0.38,1.28,dz-0.004),Vector3(0,0,-1))
+	_paper("calendar_1993.jpg",0.3,Vector3(0.5,1.82,-D+0.006),Vector3(0,0,1),0.02)
+	_paper("poster_civil_defense.jpg",0.5,Vector3(W-0.006,1.95,0.1),Vector3(-1,0,0),-0.01)
+	# nástěnka: mapka areálu a poznámky na připínáčcích
+	var cz:=-D+0.046
+	var pin:=flat(Color(0.7,0.08,0.06),0.3)
+	var items:=[["map_site.jpg",0.36,Vector3(1.15,1.84,cz),0.03],["note_1.jpg",0.2,Vector3(1.6,1.88,cz),-0.06],
+		["note_2.jpg",0.19,Vector3(1.55,1.6,cz),0.05],["note_3.jpg",0.18,Vector3(1.02,1.57,cz),-0.03]]
+	for it in items:
+		var p: MeshInstance3D=_paper(it[0],it[1],it[2],Vector3(0,0,1),it[3])
+		var top: Vector3=p.global_transform*Vector3(0,(p.mesh as QuadMesh).size.y*0.42,0.004)
+		var pm:=MeshInstance3D.new()
+		var sp:=SphereMesh.new()
+		sp.radius=0.008
+		sp.height=0.016
+		pm.mesh=sp
+		pm.material_override=pin
+		pm.position=top
+		add_child(pm)
 
 func _build_dust() -> void:
 	var p:=GPUParticles3D.new()

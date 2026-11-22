@@ -18,3 +18,6 @@ Upraveno: zmenšené textury (2048 px, WebP), převod materiálů, změna měř�
 
 Textury `mats/` a decaly `decals/`: Abandoned Materials Pack v1 (dodal autor hry, generováno).
 Normálové a drsnostní mapy dopočítané z barevných textur.
+
+Textury `gen/` (omítka, olejový nátěr, špína, skla, deka, matrace, zrcadlo, papíry, výhled z okna):
+vyrobené kódem, `tools/texgen_lobby.py` (`python3 tools/texgen_lobby.py assets/lobby/gen`). Bez cizích licencí.
