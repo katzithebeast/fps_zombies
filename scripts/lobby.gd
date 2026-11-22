@@ -14,6 +14,7 @@ const DOOR:=Rect2(-2.2,0.0,1.6,2.2)     # dveře v jižní zdi
 var settings:={"mouse": 1.0, "fov": 75.0, "volume": 0.8, "bob": 1.0}
 var look:=[]
 var _mats:={}
+var wing: RefCounted
 var player: CharacterBody3D
 var cam: Camera3D
 var _prompt: Label
@@ -39,11 +40,14 @@ func _ready() -> void:
 	_build_environment()
 	_build_room()
 	_build_window()
+	wing=preload("res://scripts/lobby_wing.gd").new()
+	wing.L=self
 	_build_door_and_corridor()
 	_build_props()
 	_build_lamp()
 	_build_decals()
 	_build_papers()
+	wing.build(self)          # chodba, další pokoje, WC, sesterna, společenská místnost, schodiště
 	_build_dust()
 	_build_sound()
 	_build_player()
@@ -73,8 +77,10 @@ func mat(key: String, meters: float, tint:=Color.WHITE, normal:=1.0) -> Standard
 	m.albedo_texture=load(dir+"%s_albedo.jpg"%key)
 	m.albedo_color=tint
 	m.normal_enabled=true
-	m.normal_texture=load(dir+"%s_normal.jpg"%key)
-	m.normal_scale=normal
+	if ResourceLoader.exists(dir+"%s_normal.jpg"%key):
+		m.normal_texture=load(dir+"%s_normal.jpg"%key)
+		m.normal_scale=normal
+	else: m.normal_enabled=false
 	if ResourceLoader.exists(dir+"%s_rough.jpg"%key): m.roughness_texture=load(dir+"%s_rough.jpg"%key)
 	else: m.roughness=0.9
 	m.roughness_texture_channel=BaseMaterial3D.TEXTURE_CHANNEL_RED
@@ -153,8 +159,8 @@ func _build_environment() -> void:
 	env.tonemap_exposure=1.05
 	env.sdfgi_enabled=true
 	env.sdfgi_use_occlusion=true
-	env.sdfgi_cascades=2
-	env.sdfgi_min_cell_size=0.08
+	env.sdfgi_cascades=4
+	env.sdfgi_min_cell_size=0.1
 	env.sdfgi_energy=0.9
 	env.sdfgi_bounce_feedback=0.5
 	env.ssao_enabled=true
@@ -265,19 +271,7 @@ func _build_window() -> void:
 		g.position=Vector3((half[0]+half[1])*0.5,(y0+y1)*0.5,zf)
 		g.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(g)
-	# výhled: protější křídlo sanatoria v západu slunce (kulisa, nevrhá stín, nesvítí)
-	var vm:=StandardMaterial3D.new()
-	vm.shading_mode=BaseMaterial3D.SHADING_MODE_UNSHADED
-	vm.albedo_texture=load(M+"gen/window_view.jpg")
-	vm.albedo_color=Color(1.15,1.1,1.05)
-	var view:=MeshInstance3D.new()
-	var vq:=QuadMesh.new()
-	vq.size=Vector2(24.0,12.0)
-	view.mesh=vq
-	view.material_override=vm
-	view.position=Vector3((x0+x1)*0.5+1.5,3.9,-D-14.0)
-	view.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(view)
+
 	# parapet
 	slab(Vector3(x0-0.06,y0-0.04,-D-0.06),Vector3(x1+0.06,y0+0.01,-D+0.07),mat("terrazzo",0.8,Color(1.15,1.15,1.15)),true)
 	# mříže zevnitř
@@ -298,46 +292,8 @@ func _build_window() -> void:
 		box(Vector3(0.02,0.18,0.02),Vector3(cx+s*0.3,0.08,-D+0.14),rad,false)
 
 func _build_door_and_corridor() -> void:
-	# chodba za dveřmi: tlumené světlo, které je vidět okénky ve dveřích
-	var cpaint:=mat("peeling_paint",1.6,Color(0.8,0.82,0.78))
-	var z0:=D+T; var z1:=D+T+2.2
-	slab(Vector3(-4.5,-0.2,z0),Vector3(1.5,0.0,z1),mat("linoleum",1.5),false)
-	slab(Vector3(-4.5,2.8,z0),Vector3(1.5,3.0,z1),cpaint,false)
-	slab(Vector3(-4.5,0,z1),Vector3(1.5,2.8,z1+0.2),cpaint,false)
-	slab(Vector3(-4.7,0,z0),Vector3(-4.5,2.8,z1),cpaint,false)
-	slab(Vector3(1.5,0,z0),Vector3(1.7,2.8,z1),cpaint,false)
-	var cl:=OmniLight3D.new()
-	cl.position=Vector3(-1.8,2.5,z0+1.1)
-	cl.light_color=Color(1.0,0.86,0.62)
-	cl.light_energy=1.6
-	cl.omni_range=4.5
-	cl.shadow_enabled=true
-	add_child(cl)
-	# dveře: dvoukřídlé plechové s okénky, zavřené
-	var door:=_place("door",Vector3(1.72/375.7,2.3/356.66,0.0055),180.0,Vector3(DOOR.get_center().x,0,D+T*0.5))
-	for mi in door.find_children("*","MeshInstance3D",true,false):
-		var m: MeshInstance3D=mi
-		for i in m.mesh.get_surface_count():
-			var mt:=m.get_active_material(i)
-			if mt and mt.resource_name.begins_with("glass"):
-				var gl:=StandardMaterial3D.new()
-				gl.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
-				gl.albedo_texture=load(M+"gen/glass_wired.png")
-				gl.uv1_triplanar=true
-				gl.uv1_world_triplanar=true
-				gl.uv1_scale=Vector3.ONE/0.5
-				gl.roughness=0.45
-				m.set_surface_override_material(i,gl)
-				m.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var blocker:=StaticBody3D.new()
-	var cs:=CollisionShape3D.new()
-	var sh:=BoxShape3D.new()
-	sh.size=Vector3(DOOR.size.x,DOOR.size.y,0.2)
-	cs.shape=sh
-	blocker.add_child(cs)
-	blocker.position=Vector3(DOOR.get_center().x,DOOR.size.y*0.5,D+0.05)
-	add_child(blocker)
-	_interact[blocker]={"text":"[E] Dveře","call":_on_door}
+	# dveře pokoje 7 (dvoukřídlé plechové s okénky) – otevírají se do chodby
+	wing.double_door(DOOR.get_center().x,D+T*0.5,180.0,"closed","pokoj 7")
 	# vypínač vedle dveří
 	box(Vector3(0.08,0.12,0.02),Vector3(DOOR.end.x+0.25,1.3,D-0.01),flat(Color(0.82,0.8,0.72),0.4),false)
 
@@ -727,6 +683,12 @@ func _build_sound() -> void:
 ## Herní postava (scripts/player.gd): celé tělo v obleku, vlastní ruce a nohy v pohledu,
 ## v zrcadle celá postava. Zbraň v pokoji není, ruce jsou volné.
 func _build_player() -> void:
+	if OS.get_environment("LOBBY_NOPLAYER")=="1":      # náhledy v softwarovém renderu: jen kamera
+		cam=Camera3D.new()
+		cam.fov=float(settings.fov)
+		add_child(cam)
+		cam.current=true
+		return
 	var P:=preload("res://scripts/player.gd")
 	preload("res://scripts/weapon_rig.gd").skip_gun_models=true
 	P.water_at=func(_p: Vector3) -> float: return -50.0     # v pokoji žádná voda
@@ -750,6 +712,8 @@ func _build_player() -> void:
 
 func _exit_tree() -> void:
 	preload("res://scripts/weapon_rig.gd").skip_gun_models=false
+	# statická hladina hráče nesmí ukazovat na lambdu zrušeného pokoje (pád při ukončení)
+	preload("res://scripts/player.gd").water_at=Callable()
 
 func _on_footstep(kind: String, strength: float) -> void:
 	var a:=AudioStreamPlayer.new()
@@ -822,6 +786,7 @@ func _physics_process(_dt: float) -> void:
 
 func _process(dt: float) -> void:
 	_update_mirror()
+	if wing: wing.process(dt)
 	_toast_t-=dt
 	if _toast: _toast.modulate.a=clampf(_toast_t,0.0,1.0)
 	_update_lamp(dt)

@@ -257,6 +257,9 @@ Stylized Weapons Workbench, Syringe Gun – Dirty. Před zveřejněním doplnit 
 
 ## Karanténní pokoj (lobby)
 Hráčův pokoj ve starém sanatoriu (`lobby.tscn`, `scripts/lobby.gd`), z menu tlačítkem **My room**, Esc vrací do menu.
-Zatím jedna místnost se zavřenými dveřmi: postel, komoda s televizí, gauč, stůl s rádiem (E zapne odposlech),
-umyvadlo se zrcadlem, skříňka na oblek, nástěnka a polička jako budoucí sloty na odemčené věci.
+Hráčův pokoj 7 (postel, komoda s televizí, gauč, stůl s rádiem, umyvadlo se skutečným zrcadlem, skříňka,
+nástěnka a polička jako sloty na odemčené věci) v křídle sanatoria (`scripts/lobby_wing.gd`): chodba s lavičkami,
+nástěnkou a blikající zářivkou, pokoje 8 (opuštěný), 9 (zamčený) a 10 (vyrabovaný), společné WC a umývárna
+s kabinkami, sesterna za okénkem se žaluzií, společenská místnost (pingpong, televize, knihovna, automat)
+a schodiště dolů zamčené mříží. Dveře se otvírají klávesou E.
 Autoři modelů (CC BY 4.0): `assets/lobby/CREDITS.md`. Náhledy: `--script res://tools/t_lobby_shots.gd`.

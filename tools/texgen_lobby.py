@@ -382,8 +382,72 @@ def window_view():
     out = Image.fromarray((np.clip(a, 0, 1) * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.2))
     out.save(os.path.join(OUT, "window_view.jpg"), quality=90)
 
+# ---------------------------------------------------------------- 11) cedule na chodbě
+def signs():
+    def plate(name, w, h, bg, fg, lines, border=None, sub=None, size=None):
+        im = Image.new("RGB", (w, h), bg); d = ImageDraw.Draw(im)
+        if border: d.rectangle([8, 8, w - 9, h - 9], outline=border, width=8)
+        n = len(lines)
+        for i, t in enumerate(lines):
+            fs = size or int(h * (0.42 if n == 1 else 0.3))
+            d.text((w // 2, int(h * (i + 0.5) / n) - (int(h * 0.06) if sub else 0)), t, font=font(fs, True), fill=fg, anchor="mm")
+        if sub: d.text((w // 2, h - int(h * 0.16)), sub, font=font(int(h * 0.12)), fill=fg, anchor="mm")
+        age(im, hash(name) % 1000).save(os.path.join(OUT, name), quality=92)
+    for n in (7, 8, 9, 10):
+        plate(f"plate_room_{n}.jpg", 300, 300, (40, 60, 52), (230, 225, 205), [str(n)], border=(200, 195, 170))
+    plate("sign_wc.jpg", 600, 300, (232, 228, 214), (30, 30, 30), ["WC"], border=(40, 40, 40), sub="MUŽI · ŽENY · UMÝVÁRNA")
+    plate("sign_nurse.jpg", 700, 240, (232, 228, 214), (30, 30, 30), ["SESTRA"], border=(40, 40, 40), sub="Služebna – vstup jen pro personál")
+    plate("sign_hall.jpg", 1100, 240, (40, 60, 52), (235, 230, 210), ["SPOLEČENSKÁ MÍSTNOST"], size=80)
+    plate("sign_exit.jpg", 800, 300, (30, 140, 70), (245, 250, 245), ["ÚNIKOVÝ VÝCHOD"], size=82)
+    plate("sign_stairs.jpg", 800, 420, (220, 200, 40), (25, 25, 25), ["ZÁKAZ VSTUPU", "SCHODIŠTĚ UZAVŘENO"], border=(25, 25, 25))
+    plate("sign_nosmoke.jpg", 500, 300, (232, 228, 214), (160, 30, 30), ["KOUŘENÍ", "ZAKÁZÁNO"], border=(160, 30, 30))
+    # rozpis služeb a oběžník na nástěnku chodby
+    w, h = 700, 900
+    im = paper_base(w, h, 120); d = ImageDraw.Draw(im)
+    d.text((w // 2, 60), "ROZPIS SLUŽEB – LISTOPAD", font=font(36, True), fill=(30, 30, 30), anchor="mm")
+    names = ["MUDr. Hájek", "s. Novotná", "s. Dvořáková", "Bc. Šimek", "s. Krejčí"]
+    r = random.Random(121)
+    for i in range(14):
+        y = 130 + i * 52
+        d.line([40, y + 40, w - 40, y + 40], fill=(150, 140, 120), width=1)
+        d.text((60, y + 10), f"{i + 1}. 11.", font=font(26, mono=True), fill=(40, 40, 40))
+        d.text((220, y + 10), r.choice(names), font=font(26, mono=True), fill=(40, 40, 40))
+        if i > 9: d.line([50, y + 22, w - 50, y + 22], fill=(160, 30, 30), width=3)
+    age(im, 122).save(os.path.join(OUT, "paper_roster.jpg"), quality=92)
+    w, h = 700, 950
+    im = paper_base(w, h, 123); d = ImageDraw.Draw(im)
+    d.text((w // 2, 70), "OBĚŽNÍK č. 3/93", font=font(40, True, serif=True), fill=(30, 30, 30), anchor="mm")
+    txt = ["Z nařízení vedení ústavu se", "s okamžitou platností ruší", "vycházky do areálu lázní.", "",
+           "Pacienti oddělení B zůstávají", "na pokojích. Jídlo bude", "podáváno okénkem.", "",
+           "Jakékoli příznaky (horečka,", "zmatenost, agresivita) ihned", "hlaste službě.", "", "                 Ředitel ústavu"]
+    for i, t in enumerate(txt):
+        d.text((60, 150 + i * 52), t, font=font(30, serif=True), fill=(35, 35, 35))
+    d.ellipse([w - 230, h - 230, w - 60, h - 60], outline=(40, 60, 140), width=5)
+    d.text((w - 145, h - 145), "OÚNZ", font=font(30, True), fill=(40, 60, 140), anchor="mm")
+    age(im, 124).save(os.path.join(OUT, "paper_circular.jpg"), quality=92)
+    # hodiny (ciferník)
+    n = 512
+    im = Image.new("RGB", (n, n), (235, 232, 220)); d = ImageDraw.Draw(im)
+    d.ellipse([10, 10, n - 10, n - 10], outline=(30, 30, 30), width=14)
+    for i in range(60):
+        a = i / 60 * 2 * math.pi; r0 = n * 0.42 if i % 5 else n * 0.36
+        d.line([n / 2 + math.sin(a) * r0, n / 2 - math.cos(a) * r0, n / 2 + math.sin(a) * n * 0.45, n / 2 - math.cos(a) * n * 0.45], fill=(30, 30, 30), width=10 if i % 5 == 0 else 3)
+    d.text((n / 2, n * 0.68), "PRIM", font=font(30, True), fill=(60, 60, 60), anchor="mm")
+    im.save(os.path.join(OUT, "clock_face.jpg"), quality=92)
+    # knihy (hřbety) pro police
+    w, h = 1024, 256
+    im = Image.new("RGB", (w, h), (60, 50, 40)); d = ImageDraw.Draw(im); r = random.Random(130)
+    x = 0
+    while x < w:
+        bw = r.randint(18, 46); col = r.choice([(120, 40, 35), (40, 70, 110), (60, 90, 55), (150, 130, 90), (90, 70, 50), (170, 160, 140), (50, 50, 60)])
+        top = r.randint(0, 60)
+        d.rectangle([x, top, x + bw - 2, h], fill=col)
+        d.rectangle([x + 3, top + 30, x + bw - 5, top + 36], fill=tuple(min(255, c + 60) for c in col))
+        x += bw
+    age(im, 131).save(os.path.join(OUT, "books.jpg"), quality=92)
+
 if __name__ == "__main__":
-    what = sys.argv[2:] or ["plaster", "paint", "grunge", "dirt", "glass", "wired", "blanket", "mirror", "papers", "view"]
+    what = sys.argv[2:] or ["plaster", "paint", "grunge", "dirt", "glass", "wired", "blanket", "mirror", "papers", "view", "signs"]
     if "plaster" in what: plaster()
     if "paint" in what:
         oil_paint("paint_cream", (0.84, 0.81, 0.7), (0.74, 0.7, 0.6))
@@ -396,4 +460,6 @@ if __name__ == "__main__":
     if "mirror" in what: mirror()
     if "papers" in what: papers()
     if "view" in what: window_view()
+    if "signs" in what: signs()
     print("hotovo")
+
