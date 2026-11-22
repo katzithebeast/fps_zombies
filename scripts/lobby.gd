@@ -11,14 +11,11 @@ const TILE_H:=1.45    # obklad do výšky
 const WIN:=Rect2(-1.2,1.5,1.3,1.3)      # okno v severní zdi: x, y, šířka, výška
 const DOOR:=Rect2(-2.2,0.0,1.6,2.2)     # dveře v jižní zdi
 
-var settings:={"mouse": 1.0, "fov": 75.0, "volume": 0.8}
+var settings:={"mouse": 1.0, "fov": 75.0, "volume": 0.8, "bob": 1.0}
+var look:=[]
 var _mats:={}
 var player: CharacterBody3D
 var cam: Camera3D
-var _yaw:=0.0
-var _pitch:=0.0
-var _step_t:=0.0
-var _bob:=0.0
 var _prompt: Label
 var _toast: Label
 var _toast_t:=0.0
@@ -37,6 +34,7 @@ var _sink_pos:=Vector3.ZERO
 var _steps:=[]
 
 func _ready() -> void:
+	process_priority=100          # zrcadlo až po kameře hráče (ta se hýbe v _process postavy)
 	_load_settings()
 	_build_environment()
 	_build_room()
@@ -58,6 +56,10 @@ func _load_settings() -> void:
 	if cf.load("user://settings.cfg")==OK:
 		for k in settings:
 			if cf.has_section_key("s",k): settings[k]=float(cf.get_value("s",k))
+		var keys:=["look_suit","look_rubber","look_visor","look_pattern","look_pattern_color","look_pattern_scale","look_rubber_fx"]
+		if cf.has_section_key("s","look_suit"):
+			for k in keys: look.append(cf.get_value("s",k))
+			look[3]=int(look[3]); look[5]=clampf(float(look[5]),0.2,4.0); look[6]=int(look[6])
 	AudioServer.set_bus_volume_db(0,linear_to_db(maxf(float(settings.volume),0.001)))
 
 # ------------------------------------------------------------------ materiály
@@ -175,6 +177,9 @@ func _build_environment() -> void:
 	env.adjustment_enabled=true
 	env.adjustment_saturation=0.92
 	env.adjustment_contrast=1.06
+	if OS.get_environment("LOBBY_LITE")=="1":      # jen pro náhledy v softwarovém renderu (málo paměti)
+		env.sdfgi_enabled=false
+		env.volumetric_fog_enabled=false
 	we.environment=env
 	add_child(we)
 	# Večerní slunce zvenku, šikmo přes mříže do pokoje (teplé, kontrast proti zářivce)
@@ -427,20 +432,58 @@ func _build_props() -> void:
 	_sink_pos=_aabb(sink).get_center()
 	var sa:=_aabb(sink)
 	box(Vector3(0.5,0.62,0.03),Vector3(sa.get_center().x,sa.end.y+0.5,D-0.03),flat(Color(0.18,0.17,0.15),0.5),false)
-	var mirror:=StandardMaterial3D.new()
-	mirror.albedo_texture=load(M+"gen/mirror_albedo.jpg")
-	mirror.roughness_texture=load(M+"gen/mirror_rough.jpg")
-	mirror.roughness_texture_channel=BaseMaterial3D.TEXTURE_CHANNEL_RED
-	mirror.metallic=1.0
-	_quad(Vector2(0.44,0.56),Vector3(sa.get_center().x,sa.end.y+0.5,D-0.05),Vector3(0,0,-1),mirror)
-	var probe:=ReflectionProbe.new()
-	probe.position=Vector3(sa.get_center().x,1.6,1.2)
-	probe.size=Vector3(5.0,3.2,3.8)
-	probe.box_projection=true
-	probe.interior=true
-	probe.update_mode=ReflectionProbe.UPDATE_ONCE
-	# zrcadlo se nasnímá, až se usadí světlo (GI potřebuje pár snímků)
-	get_tree().create_timer(1.2).timeout.connect(func(): add_child(probe))
+	_build_mirror(Vector3(sa.get_center().x,sa.end.y+0.5,D-0.05),Vector3(0,0,-1),Vector2(0.44,0.56))
+
+# ------------------------------------------------------------------ zrcadlo (skutečný odraz)
+
+const MIRROR_LAYER:=1<<10
+var _mirror_cam: Camera3D
+var _mirror_vp: SubViewport
+var _mirror_c:=Vector3.ZERO
+var _mirror_n:=Vector3.ZERO
+var _mirror_size:=Vector2.ZERO
+var _mirror_on:=true
+
+## Odražená kamera za zrcadlem, frustum přesně na obdélník zrcadla (žádné ořezávání pokoje
+## za zrcadlem, žádné deformace). Vidí celé tělo hráče (vrstva 4), ne kopii pro vlastní pohled.
+func _build_mirror(center: Vector3, normal: Vector3, size: Vector2) -> void:
+	_mirror_c=center
+	_mirror_n=normal.normalized()
+	_mirror_size=size
+	_mirror_vp=SubViewport.new()
+	_mirror_vp.size=Vector2i(int(size.x*1200.0),int(size.y*1200.0))
+	_mirror_vp.render_target_update_mode=SubViewport.UPDATE_ALWAYS
+	_mirror_vp.msaa_3d=Viewport.MSAA_2X
+	add_child(_mirror_vp)
+	_mirror_cam=Camera3D.new()
+	_mirror_cam.projection=Camera3D.PROJECTION_FRUSTUM
+	_mirror_cam.cull_mask=0xFFFFF & ~8 & ~MIRROR_LAYER
+	_mirror_vp.add_child(_mirror_cam)
+	var sm:=ShaderMaterial.new()
+	sm.shader=load("res://shaders/lobby_mirror.gdshader")
+	sm.set_shader_parameter("reflection",_mirror_vp.get_texture())
+	sm.set_shader_parameter("wear",load(M+"gen/mirror_albedo.jpg"))
+	var q:=_quad(size,center,_mirror_n,sm)
+	q.layers=MIRROR_LAYER
+	q.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var vis:=VisibleOnScreenNotifier3D.new()
+	vis.aabb=AABB(Vector3(-size.x*0.5,-size.y*0.5,-0.05),Vector3(size.x,size.y,0.1))
+	q.add_child(vis)
+	vis.screen_entered.connect(func(): _mirror_on=true; _mirror_vp.render_target_update_mode=SubViewport.UPDATE_ALWAYS)
+	vis.screen_exited.connect(func(): _mirror_on=false; _mirror_vp.render_target_update_mode=SubViewport.UPDATE_DISABLED)
+
+func _update_mirror() -> void:
+	if _mirror_cam==null or cam==null or not _mirror_on: return
+	var e:=cam.global_position
+	var n:=_mirror_n
+	var e2:=e-2.0*(e-_mirror_c).dot(n)*n          # oko odražené za zrcadlo
+	var z:=-n
+	var x:=Vector3.UP.cross(z).normalized()
+	var y:=z.cross(x)
+	_mirror_cam.global_transform=Transform3D(Basis(x,y,z),e2)
+	var local:=_mirror_cam.global_transform.affine_inverse()*_mirror_c
+	var dist:=maxf(-local.z,0.02)
+	_mirror_cam.set_frustum(_mirror_size.y,Vector2(local.x,local.y),dist,40.0)
 
 func _body_for(n: Node3D, min_size:=Vector3.ZERO) -> StaticBody3D:
 	var a:=_aabb(n)
@@ -578,36 +621,65 @@ func _build_papers() -> void:
 		pm.position=top
 		add_child(pm)
 
+## Prach ve vzduchu: měkké kulaté smítko (ne pixel), různě velké, pomalu se vznáší a točí.
+## Je osvětlené – v paprsku slunce září, ve stínu skoro zmizí; u kamery se rozplyne.
 func _build_dust() -> void:
 	var p:=GPUParticles3D.new()
-	p.amount=260
-	p.lifetime=14.0
-	p.preprocess=14.0
-	p.visibility_aabb=AABB(Vector3(-W,0,-D),Vector3(W*2,H,D*2))
+	p.amount=700
+	p.lifetime=16.0
+	p.preprocess=16.0
+	p.fixed_fps=30
+	p.visibility_aabb=AABB(Vector3(-W,-H*0.5,-D),Vector3(W*2,H,D*2))
+	p.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var pm:=ParticleProcessMaterial.new()
 	pm.emission_shape=ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	pm.emission_box_extents=Vector3(W-0.2,H*0.5-0.1,D-0.2)
-	pm.gravity=Vector3(0,-0.004,0)
-	pm.initial_velocity_min=0.0
-	pm.initial_velocity_max=0.03
+	pm.emission_box_extents=Vector3(W-0.15,H*0.5-0.1,D-0.15)
+	pm.gravity=Vector3(0,-0.003,0)
 	pm.direction=Vector3(0,1,0)
 	pm.spread=180.0
+	pm.initial_velocity_min=0.0
+	pm.initial_velocity_max=0.025
+	pm.damping_min=0.01
+	pm.damping_max=0.03
 	pm.turbulence_enabled=true
-	pm.turbulence_noise_strength=0.4
-	pm.turbulence_noise_speed_random=0.2
-	pm.turbulence_influence_min=0.01
+	pm.turbulence_noise_strength=0.6
+	pm.turbulence_noise_scale=1.6
+	pm.turbulence_noise_speed_random=0.3
+	pm.turbulence_influence_min=0.008
 	pm.turbulence_influence_max=0.03
-	pm.scale_min=0.6
-	pm.scale_max=1.4
+	pm.angle_min=0.0
+	pm.angle_max=360.0
+	pm.angular_velocity_min=-20.0
+	pm.angular_velocity_max=20.0
+	pm.scale_min=0.35
+	pm.scale_max=1.6
+	# rozsvítit a zhasnout plynule (žádné vyskakování)
+	var fade:=Gradient.new()
+	fade.set_color(0,Color(1,1,1,0))
+	fade.set_color(1,Color(1,1,1,0))
+	fade.add_point(0.15,Color(1,1,1,1))
+	fade.add_point(0.85,Color(1,1,1,1))
+	var gt:=GradientTexture1D.new()
+	gt.gradient=fade
+	pm.color_ramp=gt
 	p.process_material=pm
 	var q:=QuadMesh.new()
-	q.size=Vector2(0.004,0.004)
+	q.size=Vector2(0.007,0.007)
 	var dm:=StandardMaterial3D.new()
-	dm.billboard_mode=BaseMaterial3D.BILLBOARD_ENABLED
-	dm.albedo_color=Color(1.0,0.95,0.85,0.7)
+	dm.billboard_mode=BaseMaterial3D.BILLBOARD_PARTICLES
+	dm.billboard_keep_scale=true
+	dm.albedo_texture=load(M+"gen/dust_mote.png")
+	dm.albedo_color=Color(1.0,0.96,0.88,0.55)
+	dm.vertex_color_use_as_albedo=true
 	dm.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
+	dm.shading_mode=BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	dm.diffuse_mode=BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
 	dm.backlight_enabled=true
-	dm.backlight=Color(1,1,1)
+	dm.backlight=Color(0.8,0.75,0.65)
+	dm.roughness=1.0
+	dm.distance_fade_mode=BaseMaterial3D.DISTANCE_FADE_PIXEL_ALPHA
+	dm.distance_fade_min_distance=0.15
+	dm.distance_fade_max_distance=0.5
 	q.material=dm
 	p.draw_pass_1=q
 	p.position=Vector3(0,H*0.5,0)
@@ -652,27 +724,45 @@ func _build_sound() -> void:
 
 # ------------------------------------------------------------------ hráč
 
+## Herní postava (scripts/player.gd): celé tělo v obleku, vlastní ruce a nohy v pohledu,
+## v zrcadle celá postava. Zbraň v pokoji není, ruce jsou volné.
 func _build_player() -> void:
-	player=CharacterBody3D.new()
-	var cs:=CollisionShape3D.new()
-	var cap:=CapsuleShape3D.new()
-	cap.radius=0.28
-	cap.height=1.75
-	cs.shape=cap
-	cs.position.y=0.875
-	player.add_child(cs)
-	player.position=Vector3(-1.0,0.02,1.3)
+	var P:=preload("res://scripts/player.gd")
+	preload("res://scripts/weapon_rig.gd").skip_gun_models=true
+	P.water_at=func(_p: Vector3) -> float: return -50.0     # v pokoji žádná voda
+	player=P.new()
 	add_child(player)
-	cam=Camera3D.new()
-	cam.position.y=1.62
-	cam.fov=float(settings.fov)
-	cam.near=0.03
-	player.add_child(cam)
-	_yaw=deg_to_rad(-25.0)
-	_pitch=deg_to_rad(4.0)
+	player.mouse_scale=float(settings.mouse)
+	player.base_fov=float(settings.fov)
+	player.bob_scale=float(settings.bob)
+	player.teleport(Vector3(-1.0,0.02,1.3),deg_to_rad(-25.0),deg_to_rad(4.0))
+	cam=player.camera
+	# zbraňový skript v pokoji nepotřebujeme (střelba, přebíjení, házení)
+	for f in ["set_process","set_physics_process","set_process_input","set_process_unhandled_input"]:
+		player.weapon.call(f,false)
+	if look.size()==7 and player.body.has_method("apply_look"):
+		player.body.call_deferred("apply_look",look)
+	player.footstep.connect(_on_footstep)
+	player.interact_requested.connect(_on_interact)
 	Input.mouse_mode=Input.MOUSE_MODE_CAPTURED
 	# po přepnutí z menu ještě jednou, až scéna doběhne (menu mohlo myš uvolnit)
 	get_tree().create_timer(0.2).timeout.connect(func(): Input.mouse_mode=Input.MOUSE_MODE_CAPTURED)
+
+func _exit_tree() -> void:
+	preload("res://scripts/weapon_rig.gd").skip_gun_models=false
+
+func _on_footstep(kind: String, strength: float) -> void:
+	var a:=AudioStreamPlayer.new()
+	a.stream=_steps.pick_random()
+	a.volume_db=-17.0+linear_to_db(maxf(strength,0.1))*0.5
+	a.pitch_scale=randf_range(0.92,1.06)
+	add_child(a)
+	a.play()
+	a.finished.connect(a.queue_free)
+
+func _on_interact() -> void:
+	var hit:=_look_target()
+	if hit and _interact.has(hit): (_interact[hit].call as Callable).call()
 
 func _build_hud() -> void:
 	var cl:=CanvasLayer.new()
@@ -704,25 +794,18 @@ func _build_hud() -> void:
 	_prompt.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	_toast.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	cl.add_child(dot)
-	_say("Karanténa. Pohyb WASD, interakce E, Esc zpět do menu.")
+	_say("Karanténa. Pohyb WASD, přikrčení C, interakce E, Esc zpět do menu.")
 
 func _say(t: String) -> void:
 	_toast.text=t
 	_toast_t=4.0
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and Input.mouse_mode==Input.MOUSE_MODE_CAPTURED:
-		_yaw-=event.relative.x*0.0022*float(settings.mouse)
-		_pitch=clampf(_pitch-event.relative.y*0.0022*float(settings.mouse),-1.45,1.45)
-	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseButton and event.pressed and Input.mouse_mode!=Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode=Input.MOUSE_MODE_CAPTURED
-	elif event is InputEventKey and event.pressed and not event.echo:
-		if event.physical_keycode==KEY_ESCAPE:
-			Input.mouse_mode=Input.MOUSE_MODE_VISIBLE
-			get_tree().change_scene_to_file("res://main.tscn")
-		elif event.physical_keycode==KEY_E:
-			var hit:=_look_target()
-			if hit and _interact.has(hit): (_interact[hit].call as Callable).call()
+	elif event is InputEventKey and event.pressed and not event.echo and event.physical_keycode==KEY_ESCAPE:
+		Input.mouse_mode=Input.MOUSE_MODE_VISIBLE
+		get_tree().change_scene_to_file("res://main.tscn")
 
 func _look_target() -> Object:
 	if cam==null: return null
@@ -732,40 +815,13 @@ func _look_target() -> Object:
 	var r:=get_world_3d().direct_space_state.intersect_ray(q)
 	return r.get("collider") if r else null
 
-func _physics_process(dt: float) -> void:
+func _physics_process(_dt: float) -> void:
 	if player==null: return
-	var dir:=Vector3.ZERO
-	if Input.is_physical_key_pressed(KEY_W): dir.z-=1
-	if Input.is_physical_key_pressed(KEY_S): dir.z+=1
-	if Input.is_physical_key_pressed(KEY_A): dir.x-=1
-	if Input.is_physical_key_pressed(KEY_D): dir.x+=1
-	dir=Basis(Vector3.UP,_yaw)*dir.normalized()
-	var spd:=1.6 if Input.is_physical_key_pressed(KEY_SHIFT) else 2.4
-	var v:=player.velocity
-	var want:=dir*spd
-	v.x=lerpf(v.x,want.x,1.0-exp(-10.0*dt))
-	v.z=lerpf(v.z,want.z,1.0-exp(-10.0*dt))
-	v.y=0.0 if player.is_on_floor() else v.y-9.8*dt
-	player.velocity=v
-	player.move_and_slide()
-	var hs:=Vector2(v.x,v.z).length()
-	_bob+=dt*hs*3.6
-	_step_t-=dt*hs
-	if _step_t<=0.0 and hs>0.5:
-		_step_t=0.75
-		var a:=AudioStreamPlayer.new()
-		a.stream=_steps.pick_random()
-		a.volume_db=-16.0
-		a.pitch_scale=randf_range(0.92,1.06)
-		add_child(a)
-		a.play()
-		a.finished.connect(a.queue_free)
-	cam.position.y=1.62+sin(_bob*2.0)*0.018*minf(hs,1.0)
-	cam.rotation=Vector3(_pitch,_yaw,sin(_bob)*0.003*minf(hs,1.0))
 	var t:=_look_target()
 	_prompt.text=String(_interact[t].text) if t and _interact.has(t) else ""
 
 func _process(dt: float) -> void:
+	_update_mirror()
 	_toast_t-=dt
 	if _toast: _toast.modulate.a=clampf(_toast_t,0.0,1.0)
 	_update_lamp(dt)

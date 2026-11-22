@@ -341,10 +341,13 @@ func set_gun(name: String, draw: bool=true) -> void:
 func _part(holder: Node3D, part: String) -> Node3D:
 	return holder.get_node_or_null(gun+"/"+part)
 
+## Pokoj (lobby) zbraně nepotřebuje: místo modelů prázdné uzly (rychlejší načtení, méně VRAM).
+static var skip_gun_models:=false
+
 func make_gun(layer: int) -> Node3D:
 	var gun:=Node3D.new()
 	for key in GUNS:
-		var model: Node3D=load(GUNS[key].scene).instantiate()
+		var model: Node3D=Node3D.new() if skip_gun_models else load(GUNS[key].scene).instantiate()
 		model.name=key
 		model.visible=key=="ak"
 		gun.add_child(model)
