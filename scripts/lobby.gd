@@ -671,6 +671,8 @@ func _build_player() -> void:
 	_yaw=deg_to_rad(-25.0)
 	_pitch=deg_to_rad(4.0)
 	Input.mouse_mode=Input.MOUSE_MODE_CAPTURED
+	# po přepnutí z menu ještě jednou, až scéna doběhne (menu mohlo myš uvolnit)
+	get_tree().create_timer(0.2).timeout.connect(func(): Input.mouse_mode=Input.MOUSE_MODE_CAPTURED)
 
 func _build_hud() -> void:
 	var cl:=CanvasLayer.new()
@@ -697,6 +699,10 @@ func _build_hud() -> void:
 	dot.size=Vector2(3,3)
 	dot.set_anchors_preset(Control.PRESET_CENTER)
 	dot.position=Vector2(-1.5,-1.5)
+	# zachycená myš stojí uprostřed okna – tečka nesmí brát pohyb myši pro sebe
+	dot.mouse_filter=Control.MOUSE_FILTER_IGNORE
+	_prompt.mouse_filter=Control.MOUSE_FILTER_IGNORE
+	_toast.mouse_filter=Control.MOUSE_FILTER_IGNORE
 	cl.add_child(dot)
 	_say("Karanténa. Pohyb WASD, interakce E, Esc zpět do menu.")
 
@@ -704,7 +710,7 @@ func _say(t: String) -> void:
 	_toast.text=t
 	_toast_t=4.0
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode==Input.MOUSE_MODE_CAPTURED:
 		_yaw-=event.relative.x*0.0022*float(settings.mouse)
 		_pitch=clampf(_pitch-event.relative.y*0.0022*float(settings.mouse),-1.45,1.45)
