@@ -38,8 +38,6 @@ func run() -> void:
 		if a.begins_with("--only="): only=a.trim_prefix("--only=")
 	for v in views:
 		if only!="" and not (v[0] in only.split(",")): continue
-		lob._flicker_t=999.0
-		lob._flicker=0.0
 		if lob.player: lob.player.teleport(v[1],deg_to_rad(float(v[2])),deg_to_rad(float(v[3])))
 		else: lob.cam.global_transform=Transform3D(Basis.from_euler(Vector3(deg_to_rad(float(v[3])),deg_to_rad(float(v[2])),0)),v[1]+Vector3(0,1.6,0))
 		for i in 25: await process_frame

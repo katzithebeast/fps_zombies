@@ -20,13 +20,6 @@ var cam: Camera3D
 var _prompt: Label
 var _toast: Label
 var _toast_t:=0.0
-var _interact:={}            # collider -> {text, call}
-var _lamp_light: SpotLight3D
-var _lamp_tube: MeshInstance3D
-var _lamp_fill: OmniLight3D
-var _lamp_hum: AudioStreamPlayer3D
-var _flicker_t:=4.0
-var _flicker:=0.0
 var _radio: AudioStreamPlayer3D
 var _radio_on:=false
 var _radio_next:=0.0
@@ -34,9 +27,35 @@ var _drip_t:=3.0
 var _sink_pos:=Vector3.ZERO
 var _steps:=[]
 
+## Mapa pokoje a křídla je normální scéna: maps/lobby_map.tscn (upravuje se v editoru).
+## Kód níže ji umí znovu vygenerovat (tools/bake_lobby.gd), ale tím by se ruční úpravy přepsaly.
+const MAP:="res://maps/lobby_map.tscn"
+static var bake:=false
+var map: Node3D
+
 func _ready() -> void:
-	process_priority=100          # zrcadlo až po kameře hráče (ta se hýbe v _process postavy)
+	add_to_group("lobby_main")
 	_load_settings()
+	if bake or (not ResourceLoader.exists(MAP) and get_node_or_null("LobbyMap")==null):
+		_generate()
+		if bake: return
+		map=self
+	else:
+		map=get_node_or_null("LobbyMap")       # mapa je vložená v lobby.tscn (dá se upravovat i tam)
+		if map==null:
+			map=load(MAP).instantiate()
+			add_child(map)
+	if OS.get_environment("LOBBY_LITE")=="1":      # jen pro náhledy v softwarovém renderu (málo paměti)
+		var we: WorldEnvironment=map.find_children("*","WorldEnvironment",true,false).front()
+		if we:
+			we.environment.sdfgi_enabled=false
+			we.environment.volumetric_fog_enabled=false
+	_build_runtime_sound()
+	_build_player()
+	_build_hud()
+
+## Vygeneruje celé křídlo kódem (původní stavba). Používá ho tools/bake_lobby.gd.
+func _generate() -> void:
 	_build_environment()
 	_build_room()
 	_build_window()
@@ -47,11 +66,14 @@ func _ready() -> void:
 	_build_lamp()
 	_build_decals()
 	_build_papers()
-	wing.build(self)          # chodba, další pokoje, WC, sesterna, společenská místnost, schodiště
+	wing.build(self)
 	_build_dust()
 	_build_sound()
-	_build_player()
-	_build_hud()
+	var sp:=Marker3D.new()
+	sp.name="SpawnHrace"
+	sp.position=Vector3(-1.0,0.02,1.3)
+	sp.rotation.y=deg_to_rad(-25.0)
+	add_child(sp)
 
 # ------------------------------------------------------------------ nastavení
 
@@ -183,9 +205,6 @@ func _build_environment() -> void:
 	env.adjustment_enabled=true
 	env.adjustment_saturation=0.92
 	env.adjustment_contrast=1.06
-	if OS.get_environment("LOBBY_LITE")=="1":      # jen pro náhledy v softwarovém renderu (málo paměti)
-		env.sdfgi_enabled=false
-		env.volumetric_fog_enabled=false
 	we.environment=env
 	add_child(we)
 	# Večerní slunce zvenku, šikmo přes mříže do pokoje (teplé, kontrast proti zářivce)
@@ -293,7 +312,7 @@ func _build_window() -> void:
 
 func _build_door_and_corridor() -> void:
 	# dveře pokoje 7 (dvoukřídlé plechové s okénky) – otevírají se do chodby
-	wing.double_door(DOOR.get_center().x,D+T*0.5,180.0,"closed","pokoj 7")
+	wing.double_door(DOOR.get_center().x,D+T*0.5,180.0,"closed","pokoj 7",-1.0)
 	# vypínač vedle dveří
 	box(Vector3(0.08,0.12,0.02),Vector3(DOOR.end.x+0.25,1.3,D-0.01),flat(Color(0.82,0.8,0.72),0.4),false)
 
@@ -346,12 +365,7 @@ func _aabb(n: Node3D) -> AABB:
 func _build_props() -> void:
 	# postel u západní zdi, čelo u okna
 	var bed:=_place("bed",0.0095,-90.0,Vector3(0,0,-0.8),{"x_min":-W+0.04})
-	var blanket:=mat("gen/blanket",0.55)
-	for mi in bed.find_children("*","MeshInstance3D",true,false):
-		var m: MeshInstance3D=mi
-		for i in m.mesh.get_surface_count():
-			var mt:=m.get_active_material(i)
-			if mt and mt.resource_name=="lagen": m.set_surface_override_material(i,blanket)
+	swap_material(bed,"lagen",mat("gen/blanket",0.55))
 	# polička nad postelí (slot na trofeje)
 	var wood:=mat("old_wood",0.9,Color(1.05,1.0,0.95))
 	box(Vector3(0.22,0.03,1.0),Vector3(-W+0.11,1.62,-0.8),wood)
@@ -363,7 +377,7 @@ func _build_props() -> void:
 	var top:=_aabb(table).end.y
 	var radio:=_place("radio",0.00229,-12.0,Vector3(1.05,0,-1.62),{"y":top},false)
 	_place("multimeter",1.0,18.0,Vector3(1.66,0,-1.55),{"y":top},false)
-	_interact[_body_for(radio,Vector3(0.5,0.4,0.4))]={"text":"[E] Rádio","call":_on_radio}
+	interact(_body_for(radio,Vector3(0.5,0.4,0.4)),"[E] Rádio","radio")
 	# nástěnka nad stolem (slot na stopy)
 	var cork:=mat("cork",0.6)
 	box(Vector3(0.95,0.65,0.025),Vector3(1.35,1.75,-D+0.03),cork,false)
@@ -375,12 +389,12 @@ func _build_props() -> void:
 	var drawers:=_place("drawers",0.21,0.0,Vector3(0,0,0.95),{"x_min":-W+0.025})
 	var da:=_aabb(drawers)
 	var tv:=_place("crt_tv",0.044,90.0,Vector3(da.get_center().x-0.04,0,da.get_center().z),{"y":da.end.y},false)
-	_interact[_body_for(tv)]={"text":"[E] Televize","call":func(): _say("Televize zatím nehraje. Tady budou tvoje statistiky.")}
+	interact(_body_for(tv),"[E] Televize","","Televize zatím nehraje. Tady budou tvoje statistiky.")
 	# gauč u východní zdi, čelem k televizi přes celý pokoj
 	_place("sofa",0.72,-90.0,Vector3(0,0,0.1),{"x_max":W-0.04})
 	# skříňka v jihovýchodním rohu (oblek)
 	var locker:=_place("res://assets/props/locker/source/locker.glb",1.0,180.0,Vector3(0,0,0),{"x_max":W-0.03,"z_max":D-0.03})
-	_interact[locker.get_meta("body")]={"text":"[E] Skříňka","call":func(): _say("Skříňka s oblekem. Skiny přijdou sem.")}
+	interact(locker.get_meta("body"),"[E] Skříňka","","Skříňka s oblekem. Skiny přijdou sem.")
 	# umyvadlo u jižní zdi a zrcadlo nad ním
 	# mezi vypínačem u dveří a skříňkou, s mezerou od skříňky
 	var la:=_aabb(locker)
@@ -390,56 +404,27 @@ func _build_props() -> void:
 	box(Vector3(0.5,0.62,0.03),Vector3(sa.get_center().x,sa.end.y+0.5,D-0.03),flat(Color(0.18,0.17,0.15),0.5),false)
 	_build_mirror(Vector3(sa.get_center().x,sa.end.y+0.5,D-0.05),Vector3(0,0,-1),Vector2(0.44,0.56))
 
-# ------------------------------------------------------------------ zrcadlo (skutečný odraz)
+## Komponenty z scripts/lobby/ (v editoru se dají posouvat a nastavovat v inspektoru)
+func interact(body: StaticBody3D, prompt: String, action:="", message:="") -> StaticBody3D:
+	body.set_script(load("res://scripts/lobby/interact.gd"))
+	body.prompt=prompt
+	body.action=action
+	body.message=message
+	body.set_meta("prompt",prompt)
+	return body
 
-const MIRROR_LAYER:=1<<10
-var _mirror_cam: Camera3D
-var _mirror_vp: SubViewport
-var _mirror_c:=Vector3.ZERO
-var _mirror_n:=Vector3.ZERO
-var _mirror_size:=Vector2.ZERO
-var _mirror_on:=true
+func swap_material(holder: Node3D, surface: String, m: Material) -> void:
+	holder.set_script(load("res://scripts/lobby/material_swap.gd"))
+	holder.surface_name=surface
+	holder.material=m
 
-## Odražená kamera za zrcadlem, frustum přesně na obdélník zrcadla (žádné ořezávání pokoje
-## za zrcadlem, žádné deformace). Vidí celé tělo hráče (vrstva 4), ne kopii pro vlastní pohled.
 func _build_mirror(center: Vector3, normal: Vector3, size: Vector2) -> void:
-	_mirror_c=center
-	_mirror_n=normal.normalized()
-	_mirror_size=size
-	_mirror_vp=SubViewport.new()
-	_mirror_vp.size=Vector2i(int(size.x*1200.0),int(size.y*1200.0))
-	_mirror_vp.render_target_update_mode=SubViewport.UPDATE_ALWAYS
-	_mirror_vp.msaa_3d=Viewport.MSAA_2X
-	add_child(_mirror_vp)
-	_mirror_cam=Camera3D.new()
-	_mirror_cam.projection=Camera3D.PROJECTION_FRUSTUM
-	_mirror_cam.cull_mask=0xFFFFF & ~8 & ~MIRROR_LAYER
-	_mirror_vp.add_child(_mirror_cam)
-	var sm:=ShaderMaterial.new()
-	sm.shader=load("res://shaders/lobby_mirror.gdshader")
-	sm.set_shader_parameter("reflection",_mirror_vp.get_texture())
-	sm.set_shader_parameter("wear",load(M+"gen/mirror_albedo.jpg"))
-	var q:=_quad(size,center,_mirror_n,sm)
-	q.layers=MIRROR_LAYER
-	q.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var vis:=VisibleOnScreenNotifier3D.new()
-	vis.aabb=AABB(Vector3(-size.x*0.5,-size.y*0.5,-0.05),Vector3(size.x,size.y,0.1))
-	q.add_child(vis)
-	vis.screen_entered.connect(func(): _mirror_on=true; _mirror_vp.render_target_update_mode=SubViewport.UPDATE_ALWAYS)
-	vis.screen_exited.connect(func(): _mirror_on=false; _mirror_vp.render_target_update_mode=SubViewport.UPDATE_DISABLED)
-
-func _update_mirror() -> void:
-	if _mirror_cam==null or cam==null or not _mirror_on: return
-	var e:=cam.global_position
-	var n:=_mirror_n
-	var e2:=e-2.0*(e-_mirror_c).dot(n)*n          # oko odražené za zrcadlo
-	var z:=-n
-	var x:=Vector3.UP.cross(z).normalized()
-	var y:=z.cross(x)
-	_mirror_cam.global_transform=Transform3D(Basis(x,y,z),e2)
-	var local:=_mirror_cam.global_transform.affine_inverse()*_mirror_c
-	var dist:=maxf(-local.z,0.02)
-	_mirror_cam.set_frustum(_mirror_size.y,Vector2(local.x,local.y),dist,40.0)
+	var mr:=Node3D.new()
+	mr.name="Zrcadlo"
+	mr.set_script(load("res://scripts/lobby/mirror.gd"))
+	add_child(mr)
+	mr.global_transform=Transform3D(Basis.looking_at(-normal),center)
+	mr.size=size
 
 func _body_for(n: Node3D, min_size:=Vector3.ZERO) -> StaticBody3D:
 	var a:=_aabb(n)
@@ -456,36 +441,7 @@ func _body_for(n: Node3D, min_size:=Vector3.ZERO) -> StaticBody3D:
 # ------------------------------------------------------------------ zářivka
 
 func _build_lamp() -> void:
-	var p:=Vector3(0.2,H,0.0)
-	var housing:=mat("painted_metal",0.5,Color(1.9,1.95,1.9),0.5)
-	box(Vector3(1.25,0.07,0.16),p+Vector3(0,-0.42,0),housing,false)
-	for s in [-0.45,0.45]:
-		cyl(0.006,0.38,p+Vector3(s,-0.19,0),flat(Color(0.3,0.3,0.3),0.4,0.8))
-	var tm:=StandardMaterial3D.new()
-	tm.albedo_color=Color(0.95,0.98,1.0)
-	tm.emission_enabled=true
-	tm.emission=Color(0.85,0.95,1.0)
-	tm.emission_energy_multiplier=6.0
-	_lamp_tube=cyl(0.016,1.15,p+Vector3(0,-0.47,0),tm,Vector3(0,0,PI/2))
-	_lamp_tube.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_lamp_light=SpotLight3D.new()
-	_lamp_light.position=p+Vector3(0,-0.5,0)
-	_lamp_light.rotation.x=-PI/2
-	_lamp_light.spot_angle=78.0
-	_lamp_light.spot_range=6.0
-	_lamp_light.spot_attenuation=0.6
-	_lamp_light.light_color=Color(0.86,0.94,1.0)
-	_lamp_light.light_energy=1.25
-	_lamp_light.light_volumetric_fog_energy=0.3
-	_lamp_light.shadow_enabled=true
-	add_child(_lamp_light)
-	_lamp_fill=OmniLight3D.new()
-	_lamp_fill.position=p+Vector3(0,-0.55,0)
-	_lamp_fill.omni_range=5.0
-	_lamp_fill.light_color=Color(0.86,0.94,1.0)
-	_lamp_fill.light_energy=0.35
-	_lamp_fill.light_volumetric_fog_energy=0.0
-	add_child(_lamp_fill)
+	wing.lamp(Vector3(0.2,H,0.0),1.25,true,"rare",false,true)
 
 # ------------------------------------------------------------------ špína, plíseň, praskliny
 
@@ -654,14 +610,23 @@ func _snd(file: String, pos: Vector3, db:=0.0, loop:=false, unit:=6.0) -> AudioS
 	a.volume_db=db
 	a.unit_size=unit
 	a.position=pos
+	a.autoplay=loop
 	add_child(a)
 	if loop: a.play()
 	return a
 
 func _build_sound() -> void:
 	_snd("res://audio/amb_room.wav",Vector3(0,1.5,0),-14.0,true,10.0)
-	_lamp_hum=_snd("res://audio/lamp_hum.wav",Vector3(0.2,H-0.45,0),-22.0,true,2.0)
-	_radio=_snd("res://audio/radio/radio_check_c1.wav",Vector3(1.05,0.95,-1.62),-4.0,false,3.0)
+
+## Zvuky, které hraje kód za běhu: rádio u modelu rádia, kapky z umyvadla, kroky.
+func _build_runtime_sound() -> void:
+	var radio_body: Node3D=null
+	for n in get_tree().get_nodes_in_group("lobby_radio"): radio_body=n
+	if radio_body==null:
+		for b in map.find_children("*","StaticBody3D",true,false):
+			if b.get("action")=="radio": radio_body=b
+	_radio=_snd("res://audio/radio/radio_check_c1.wav",radio_body.global_position if radio_body else Vector3(1.05,0.95,-1.62),-4.0,false,3.0)
+	_radio.autoplay=false
 	var bus:=AudioServer.get_bus_index("Radio")
 	if bus<0:
 		AudioServer.add_bus()
@@ -676,6 +641,8 @@ func _build_sound() -> void:
 		dist.drive=0.25
 		AudioServer.add_bus_effect(bus,dist)
 	_radio.bus="Radio"
+	var sink: Node3D=map.find_child("sink",true,false)
+	_sink_pos=_aabb(sink).get_center() if sink else Vector3(0.3,0.9,1.7)
 	for i in range(1,7): _steps.append(load("res://audio/step_tile_%d.wav"%i))
 
 # ------------------------------------------------------------------ hráč
@@ -697,7 +664,9 @@ func _build_player() -> void:
 	player.mouse_scale=float(settings.mouse)
 	player.base_fov=float(settings.fov)
 	player.bob_scale=float(settings.bob)
-	player.teleport(Vector3(-1.0,0.02,1.3),deg_to_rad(-25.0),deg_to_rad(4.0))
+	var sp: Node3D=map.find_child("SpawnHrace",true,false)
+	if sp: player.teleport(sp.global_position,sp.global_rotation.y,deg_to_rad(4.0))
+	else: player.teleport(Vector3(-1.0,0.02,1.3),deg_to_rad(-25.0),deg_to_rad(4.0))
 	cam=player.camera
 	# zbraňový skript v pokoji nepotřebujeme (střelba, přebíjení, házení)
 	for f in ["set_process","set_physics_process","set_process_input","set_process_unhandled_input"]:
@@ -726,7 +695,13 @@ func _on_footstep(kind: String, strength: float) -> void:
 
 func _on_interact() -> void:
 	var hit:=_look_target()
-	if hit and _interact.has(hit): (_interact[hit].call as Callable).call()
+	if hit and hit.has_meta("use"): (hit.get_meta("use") as Callable).call()
+	elif hit and hit.has_method("use"): hit.use()
+
+func _on_action(action: String, node: Node) -> void:
+	if action=="radio": _on_radio()
+
+func say(t: String) -> void: _say(t)
 
 func _build_hud() -> void:
 	var cl:=CanvasLayer.new()
@@ -782,14 +757,12 @@ func _look_target() -> Object:
 func _physics_process(_dt: float) -> void:
 	if player==null: return
 	var t:=_look_target()
-	_prompt.text=String(_interact[t].text) if t and _interact.has(t) else ""
+	_prompt.text=String(t.get_meta("prompt")) if t and t.has_meta("prompt") else ""
 
 func _process(dt: float) -> void:
-	_update_mirror()
-	if wing: wing.process(dt)
+	if bake: return
 	_toast_t-=dt
 	if _toast: _toast.modulate.a=clampf(_toast_t,0.0,1.0)
-	_update_lamp(dt)
 	_update_radio(dt)
 	_drip_t-=dt
 	if _drip_t<=0.0:
@@ -797,32 +770,6 @@ func _process(dt: float) -> void:
 		var d:=_snd("res://audio/drip_%d.wav"%randi_range(2,6),_sink_pos,-20.0,false,1.5)
 		d.play()
 		d.finished.connect(d.queue_free)
-
-func _update_lamp(dt: float) -> void:
-	if _lamp_light==null: return
-	_flicker_t-=dt
-	if _flicker_t<=0.0:
-		_flicker_t=randf_range(6.0,18.0)
-		_flicker=randf_range(0.25,0.6)
-		var c:=_snd("res://audio/lamp_click.wav",_lamp_light.position,-18.0,false,2.0)
-		c.play()
-		c.finished.connect(c.queue_free)
-	var k:=1.0
-	if _flicker>0.0:
-		_flicker-=dt
-		k=0.25 if fmod(Time.get_ticks_msec()*0.001*23.0,1.0)<0.45 else 1.0
-	_lamp_light.light_energy=1.25*k
-	_lamp_fill.light_energy=0.35*k
-	(_lamp_tube.material_override as StandardMaterial3D).emission_energy_multiplier=6.0*k
-
-# ------------------------------------------------------------------ interakce
-
-func _on_door() -> void:
-	_say("Zamčeno. Eskorta pro tebe zatím nepřišla.")
-	var a:=_snd("res://audio/locker_open.wav",Vector3(DOOR.get_center().x,1.1,D),-10.0,false,3.0)
-	a.pitch_scale=0.7
-	a.play()
-	a.finished.connect(a.queue_free)
 
 func _on_radio() -> void:
 	_radio_on=not _radio_on

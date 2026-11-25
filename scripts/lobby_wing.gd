@@ -14,7 +14,6 @@ const SZ0:=4.6             # jižní pokoje: vnitřní z
 const SZ1:=8.4
 const HALL:=Rect2(14.25,-1.9,9.75,10.3)   # x, z, šířka, hloubka (vnitřek)
 
-var lamps:=[]              # [{light, fill, tube, base, mode}] – blikání a mrtvé zářivky
 var doors:=[]
 var _paint: Material
 var _tiles: Material
@@ -123,217 +122,50 @@ func window(origin: Vector3, yaw: float, w: float, y0: float, y1: float, frosted
 		L.cyl(0.02,cnt*0.052+0.06,Vector3(0,0.2,0.12),rad,Vector3(0,0,PI/2),f)
 		L.cyl(0.02,cnt*0.052+0.06,Vector3(0,0.74,0.12),rad,Vector3(0,0,PI/2),f)
 
-## Zářivka pod stropem. mode: "ok", "flicker" (občas blikne), "dead" (nesvítí).
-func lamp(p: Vector3, energy:=1.1, shadow:=false, mode:="ok", along_z:=false) -> void:
-	var housing=L.mat("painted_metal",0.5,Color(1.9,1.95,1.9),0.5)
-	var rot:=Vector3(0,PI/2,0) if along_z else Vector3.ZERO
-	var hb=L.box(Vector3(1.25,0.07,0.16),p+Vector3(0,-0.42,0),housing,false)
-	hb.rotation=rot
-	for s in [-0.45,0.45]:
-		var o:=Vector3(0,0,s) if along_z else Vector3(s,0,0)
-		L.cyl(0.006,0.38,p+o+Vector3(0,-0.19,0),L.flat(Color(0.3,0.3,0.3),0.4,0.8))
-	var tm:=StandardMaterial3D.new()
-	tm.albedo_color=Color(0.9,0.93,0.95) if mode!="dead" else Color(0.55,0.55,0.52)
-	tm.emission_enabled=mode!="dead"
-	tm.emission=Color(0.85,0.95,1.0)
-	tm.emission_energy_multiplier=5.0
-	var tube:MeshInstance3D=L.cyl(0.016,1.15,p+Vector3(0,-0.47,0),tm,Vector3(PI/2,0,0) if along_z else Vector3(0,0,PI/2))
-	tube.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	if mode=="dead": return
-	var sl:=SpotLight3D.new()
-	sl.position=p+Vector3(0,-0.5,0)
-	sl.rotation.x=-PI/2
-	sl.spot_angle=80.0
-	sl.spot_range=5.5
-	sl.spot_attenuation=0.7
-	sl.light_color=Color(0.86,0.94,1.0)
-	sl.light_energy=energy
-	sl.light_volumetric_fog_energy=0.2
-	sl.shadow_enabled=shadow
-	L.add_child(sl)
-	var fill:=OmniLight3D.new()
-	fill.position=p+Vector3(0,-0.55,0)
-	fill.omni_range=4.0
-	fill.light_color=Color(0.86,0.94,1.0)
-	fill.light_energy=energy*0.22
-	fill.light_volumetric_fog_energy=0.0
-	L.add_child(fill)
-	lamps.append({"light":sl,"fill":fill,"tube":tube,"base":energy,"mode":mode,"t":randf_range(2.0,9.0),"f":0.0})
-
-func process(dt: float) -> void:
-	for l in lamps:
-		if l.mode!="flicker": continue
-		l.t-=dt
-		if l.t<=0.0:
-			l.t=randf_range(1.5,6.0)
-			l.f=randf_range(0.2,1.2)
-			var c:AudioStreamPlayer3D=L._snd("res://audio/lamp_spark_%d.wav"%randi_range(1,2),(l.light as Node3D).position,-16.0,false,2.0)
-			c.play()
-			c.finished.connect(c.queue_free)
-		var k:=1.0
-		if l.f>0.0:
-			l.f-=dt
-			k=0.05 if fmod(Time.get_ticks_msec()*0.001*17.0+sin(Time.get_ticks_msec()*0.0037)*3.0,1.0)<0.5 else 1.0
-		(l.light as SpotLight3D).light_energy=float(l.base)*k
-		(l.fill as OmniLight3D).light_energy=float(l.base)*0.22*k
-		((l.tube as MeshInstance3D).material_override as StandardMaterial3D).emission_energy_multiplier=5.0*k
+## Zářivka pod stropem (scripts/lobby/lamp_fixture.gd). mode: ok, flicker, rare, dead.
+func lamp(p: Vector3, energy:=1.1, shadow:=false, mode:="ok", along_z:=false, hum:=false) -> void:
+	var n:=Node3D.new()
+	n.name="Zarivka"
+	n.set_script(load("res://scripts/lobby/lamp_fixture.gd"))
+	n.position=p
+	n.rotation.y=PI/2 if along_z else 0.0
+	L.add_child(n)
+	n.energy=energy
+	n.shadow=shadow
+	n.mode=mode
+	n.hum=hum
 
 # ------------------------------------------------------------------ dveře
 
-## Dvoukřídlé plechové dveře (model) rozdělené na rám a dvě křídla, která se otáčejí v pantech.
-## state: "closed", "open", "ajar", "locked". facing = otočení modelu (180 = líc do pokoje na sever).
-func double_door(cx: float, zc: float, facing: float, state: String, label: String) -> Dictionary:
-	var holder:Node3D=L._place("door",Vector3(1.72/375.7,2.3/356.66,0.0055),facing,Vector3(cx,0,zc),{},false)
-	var pivots:=_split_leaves(holder)
-	var d:={"pivots":pivots,"open":0.0,"state":state,"label":label}
-	var blocker:=StaticBody3D.new()
-	var cs:=CollisionShape3D.new()
-	var sh:=BoxShape3D.new()
-	sh.size=Vector3(1.6,2.2,0.2)
-	cs.shape=sh
-	blocker.add_child(cs)
-	blocker.position=Vector3(cx,1.1,zc)
-	L.add_child(blocker)
-	d["blocker"]=blocker
-	d["shape"]=cs
-	var start: float=float({"open":1.0,"ajar":0.35}.get(state,0.0))
-	_set_door(d,start)
-	L._interact[blocker]={"text":"[E] Dveře – "+label,"call":func(): _toggle(d)}
-	doors.append(d)
-	return d
+## Dvoukřídlé plechové dveře (scripts/lobby/door_double.gd). facing = otočení (180 = líc na sever).
+func double_door(cx: float, zc: float, facing: float, state: String, label: String, swing:=1.0) -> Node3D:
+	var n:=Node3D.new()
+	n.name="Dvere"
+	n.set_script(load("res://scripts/lobby/door_double.gd"))
+	n.position=Vector3(cx,0,zc)
+	n.rotation.y=deg_to_rad(facing)
+	n.label=label
+	n.swing=swing
+	L.add_child(n)
+	n.state=state
+	doors.append(n)
+	return n
 
-func _set_door(d: Dictionary, v: float) -> void:
-	d.open=v
-	var p: Array=d.pivots
-	if p.size()==2:
-		# křídla se otvírají do chodby (v pokoji by narážela do nábytku)
-		(p[0] as Node3D).rotation.z=v*1.75*float(d.get("sign",1.0))
-		(p[1] as Node3D).rotation.z=-v*1.75*float(d.get("sign",1.0))
-	(d.shape as CollisionShape3D).disabled=v>0.3
-
-func _toggle(d: Dictionary) -> void:
-	if d.state=="locked":
-		L._say("Zamčeno. %s."%String(d.label).capitalize())
-		var a:AudioStreamPlayer3D=L._snd("res://audio/locker_open.wav",(d.blocker as Node3D).position,-10.0,false,3.0)
-		a.pitch_scale=0.7
-		a.play()
-		a.finished.connect(a.queue_free)
-		return
-	var target:=0.0 if float(d.open)>0.5 else 1.0
-	var tw=L.create_tween()
-	tw.tween_method(func(v): _set_door(d,v),float(d.open),target,0.9).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	var s:AudioStreamPlayer3D=L._snd("res://audio/gate_open.wav",(d.blocker as Node3D).position,-14.0,false,3.0)
-	s.pitch_scale=0.9 if target>0.5 else 1.15
-	s.play()
-	s.finished.connect(s.queue_free)
-
-## Rozdělí síť dveří na rám a dvě křídla (podle polohy trojúhelníků v souřadnicích modelu)
-## a pověsí křídla na panty. Vrací [levý pant, pravý pant] (otáčí se kolem místní osy Z = nahoru).
-func _split_leaves(holder: Node3D) -> Array:
-	var mis:=holder.find_children("*","MeshInstance3D",true,false)
-	var host: MeshInstance3D=null
-	for m in mis:
-		if (m as MeshInstance3D).mesh.get_surface_count()>0 and (m as MeshInstance3D).mesh.surface_get_array_len(0)>500: host=m
-	if host==null: return []
-	var piv:=[]
-	for side in [-1.0,1.0]:
-		var p:=Node3D.new()
-		p.position=Vector3(side*171.5,0,0)
-		host.add_child(p)
-		piv.append(p)
-	for m in mis:
-		var mi: MeshInstance3D=m
-		var mesh: Mesh=mi.mesh
-		var arr: Array=mesh.surface_get_arrays(0)
-		var v: PackedVector3Array=arr[Mesh.ARRAY_VERTEX]
-		var idx: PackedInt32Array=arr[Mesh.ARRAY_INDEX]
-		if idx.is_empty():
-			idx.resize(v.size())
-			for i in v.size(): idx[i]=i
-		var groups:=[[],[],[]]   # rám, levé, pravé (indexy trojúhelníků)
-		var is_glass: bool = mi!=host and mesh.surface_get_array_len(0)<50
-		for t in range(0,idx.size(),3):
-			var c:=(v[idx[t]]+v[idx[t+1]]+v[idx[t+2]])/3.0
-			var g:=0
-			if is_glass or (absf(c.x)<168.0 and c.z<342.0): g=1 if c.x<0.0 else 2
-			(groups[g] as Array).append_array([idx[t],idx[t+1],idx[t+2]])
-		var mat: Material=mi.get_active_material(0)
-		for g in 3:
-			if (groups[g] as Array).is_empty(): continue
-			var a2:=arr.duplicate()
-			a2[Mesh.ARRAY_INDEX]=PackedInt32Array(groups[g])
-			var am:=ArrayMesh.new()
-			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,a2)
-			am.surface_set_material(0,mat)
-			if g==0:
-				mi.mesh=am
-				if mat: mi.set_surface_override_material(0,mat)
-			else:
-				var leaf:=MeshInstance3D.new()
-				leaf.mesh=am
-				leaf.material_override=mat
-				leaf.cast_shadow=mi.cast_shadow
-				var p: Node3D=piv[g-1]
-				p.add_child(leaf)
-				leaf.position=-p.position
-		if not (groups[0] as Array).is_empty(): pass
-		elif mi!=host: mi.visible=false
-	# sklo ve dveřích: drátosklo
-	var gl:=StandardMaterial3D.new()
-	gl.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
-	gl.albedo_texture=load(L.M+"gen/glass_wired.png")
-	gl.uv1_triplanar=true
-	gl.uv1_world_triplanar=true
-	gl.uv1_scale=Vector3.ONE/0.5
-	gl.roughness=0.45
-	for p in piv:
-		for leaf in (p as Node3D).get_children():
-			var lm: MeshInstance3D=leaf
-			var mt:=lm.material_override
-			if mt and mt.resource_name.begins_with("glass"):
-				lm.material_override=gl
-				lm.cast_shadow=GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	return piv
-
-## Jednokřídlé dveře (WC, sesterna, kabinky): pant v `hinge`, křídlo míří podél `yaw`.
-func single_door(hinge: Vector3, yaw: float, w: float, h: float, open: float, m: Material, label: String, state:="closed", window:=false) -> Dictionary:
-	var p:=Node3D.new()
-	p.position=hinge
-	L.add_child(p)
-	var leaf=L.box(Vector3(w,h,0.045),Vector3(w*0.5,h*0.5,0),m,true,p)
-	var knob=L.flat(Color(0.55,0.5,0.42),0.35,0.8)
-	for s in [-1,1]: L.box(Vector3(0.12,0.025,0.025),Vector3(w-0.1,1.0,s*0.04),knob,false,p)
-	if window:
-		var gl:=StandardMaterial3D.new()
-		gl.transparency=BaseMaterial3D.TRANSPARENCY_ALPHA
-		gl.albedo_texture=load(L.M+"gen/glass_wired.png")
-		gl.cull_mode=BaseMaterial3D.CULL_DISABLED
-		var q:=MeshInstance3D.new()
-		var qm:=QuadMesh.new()
-		qm.size=Vector2(w*0.5,0.45)
-		q.mesh=qm
-		q.material_override=gl
-		q.position=Vector3(w*0.5,1.55,0.025)
-		p.add_child(q)
-	var d:={"pivot":p,"yaw":yaw,"open":open,"state":state,"label":label,"leaf":leaf}
-	p.rotation.y=yaw+open*1.6
-	var body: StaticBody3D=leaf.get_child(0)
-	L._interact[body]={"text":"[E] "+label,"call":func(): _toggle_single(d)}
-	return d
-
-func _toggle_single(d: Dictionary) -> void:
-	if d.state=="locked":
-		L._say("Zamčeno. %s."%String(d.label).capitalize())
-		return
-	var target:=0.0 if float(d.open)>0.5 else 1.0
-	var tw=L.create_tween()
-	tw.tween_method(func(v):
-		d.open=v
-		(d.pivot as Node3D).rotation.y=float(d.yaw)+v*1.6,float(d.open),target,0.7).set_trans(Tween.TRANS_SINE)
-	var s:AudioStreamPlayer3D=L._snd("res://audio/gate_open.wav",(d.pivot as Node3D).position+Vector3(0,1,0),-16.0,false,3.0)
-	s.pitch_scale=1.2
-	s.play()
-	s.finished.connect(s.queue_free)
+## Jednokřídlé dveře (scripts/lobby/door_single.gd): pant v `hinge`, křídlo míří podél `yaw`.
+func single_door(hinge: Vector3, yaw: float, w: float, h: float, open: float, m: Variant, label: String, state:="closed", window:=false) -> Node3D:
+	var n:=Node3D.new()
+	n.name="DvereJednokridle"
+	n.set_script(load("res://scripts/lobby/door_single.gd"))
+	n.position=hinge
+	n.rotation.y=yaw
+	n.label=label
+	n.state=state
+	L.add_child(n)
+	n.width=w
+	n.height=h
+	n.window=window
+	n.open=open
+	return n
 
 # ------------------------------------------------------------------ drobný nábytek z kódu
 
@@ -573,7 +405,7 @@ func _stairwell() -> void:
 	gate.add_child(cs)
 	gate.position=Vector3(CX0,H*0.5,(CZ0+CZ1)*0.5)
 	L.add_child(gate)
-	L._interact[gate]={"text":"[E] Mříž","call":func(): L._say("Mříž je zamčená na řetěz. Schodiště dolů je uzavřené.")}
+	L.interact(gate,"[E] Mříž","","Mříž je zamčená na řetěz. Schodiště dolů je uzavřené.")
 	var chain=L.flat(Color(0.5,0.48,0.44),0.35,0.9)
 	for i in 8: L.box(Vector3(0.03,0.05,0.015),Vector3(CX0+0.03,1.1+sin(i)*0.02,3.0+i*0.04),chain,false)
 	L.box(Vector3(0.05,0.08,0.06),Vector3(CX0+0.05,1.02,3.32),L.flat(Color(0.6,0.5,0.25),0.3,0.9),false)
@@ -701,7 +533,7 @@ func _washroom() -> void:
 	L._decal("decal_water_3_narrow_leaks",Vector3(4.75,1.7,SZ1),Vector3(0,0,-1),Vector2(1.4,1.2),0.0,0.8)
 	lamp(Vector3(5.2,H,6.0),0.9,true,"ok",true)
 	lamp(Vector3(7.6,H,6.0),0.8,false,"flicker",true)
-	var drip=L._snd("res://audio/amb_water.wav",Vector3(4.0,1.0,6.0),-26.0,true,2.0)
+	L._snd("res://audio/amb_water.wav",Vector3(4.0,1.0,6.0),-26.0,true,2.0)
 
 # ------------------------------------------------------------------ sesterna
 
@@ -800,7 +632,7 @@ func _hall() -> void:
 		L._decal_file("gen/grunge_wall.png",g[0],g[1],Vector2(4.0,2.6),randf()*6.0,0.7)
 	L._decal("decal_water_2_damp_tide_mark",Vector3(22.5,H,-0.8),Vector3(0,-1,0),Vector2(2.0,2.0),0.3,0.8)
 	L._decal("decal_grime_3_dusty_abrasion",Vector3(18.6,0.002,4.0),Vector3(0,1,0),Vector2(5.0,3.0),0.4,0.5)
-	var hum=L._snd("res://audio/fridge_hum.wav",Vector3(x1-0.5,1.0,7.6),-22.0,true,2.0)
+	L._snd("res://audio/fridge_hum.wav",Vector3(x1-0.5,1.0,7.6),-22.0,true,2.0)
 
 # ------------------------------------------------------------------ výhled ven ze všech oken
 

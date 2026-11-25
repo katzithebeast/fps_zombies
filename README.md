@@ -262,4 +262,12 @@ nástěnka a polička jako sloty na odemčené věci) v křídle sanatoria (`scr
 nástěnkou a blikající zářivkou, pokoje 8 (opuštěný), 9 (zamčený) a 10 (vyrabovaný), společné WC a umývárna
 s kabinkami, sesterna za okénkem se žaluzií, společenská místnost (pingpong, televize, knihovna, automat)
 a schodiště dolů zamčené mříží. Dveře se otvírají klávesou E.
+
+**Úpravy mapy v editoru:** mapa je normální scéna `maps/lobby_map.tscn` (je vložená i v `lobby.tscn`).
+Otevři ji v Godotu a posouvej, maž a přidávej uzly. Složky odpovídají místnostem (Pokoj_7, Chodba, WC_umyvarna,
+Spolecenska_mistnost…), `Prostredi` obsahuje světlo a oblohu, `SpawnHrace` je místo, kde se hráč objeví.
+Chytré uzly (scripts/lobby/): `Dvere` (stav closed/open/ajar/locked, popisek), `DvereJednokridle` (šířka, otevření),
+`Zarivka` (síla, stín, ok/flicker/rare/dead), `Zrcadlo` (velikost), `Interakce` (text a akce pro klávesu E).
+Nový nábytek: přetáhni `.glb` z `assets/` do scény. `tools/bake_lobby.gd` mapu vygeneruje znovu kódem –
+**přepíše tím ruční úpravy**, používej jen pro start od nuly.
 Autoři modelů (CC BY 4.0): `assets/lobby/CREDITS.md`. Náhledy: `--script res://tools/t_lobby_shots.gd`.
