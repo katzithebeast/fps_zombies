@@ -213,6 +213,8 @@ func _ready() -> void:
 	menu.quit_pressed.connect(func(): get_tree().quit())
 	# karanténní pokoj (lobby) – zatím samostatná scéna, Esc vrací sem
 	menu.room_pressed.connect(func(): get_tree().change_scene_to_file("res://lobby.tscn"))
+	# bažina v noci (prototyp nové mapy) – samostatná scéna, Esc vrací sem
+	menu.swamp_pressed.connect(func(): get_tree().change_scene_to_file("res://swamp.tscn"))
 	_setup_network()
 	_apply_look()
 	mode = ModeScript.new()

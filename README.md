@@ -280,3 +280,10 @@ Voda, světlíky a barvy podlah jsou data v uzlu `DataMapy` (inspektor) – kdy�
 Modré plochy ve složce `Voda_nahled` jsou jen náhled hladin pro editor. Za běhu kód přidává: měsíc, pár lamp,
 podvodní světla, vodu, krev a nepořádek (náhodně), vzkazy, rozhlas, úkoly a zombíky.
 `tools/bake_main.gd` mapu vygeneruje znovu kódem – **přepíše tím ruční úpravy**.
+
+## Bažina (prototyp nové mapy)
+Menu → **The swamp (prototype)**, scéna `swamp.tscn`, kód `scripts/swamp.gd`. Noc, déšť, mlha a tma, vidět je jen
+kam svítí baterka (F). Všude kalná voda po kolena, ostrůvky, hlubší tůně, suché stromy, keře, rákos a kameny.
+Mapa se při každém spuštění vygeneruje jinak (pevný seed pro test: proměnná prostředí `SWAMP_SEED=123`).
+Od místa výsadku vede k polozatopenému sovětskému bunkru rozpadlá lávka a cedule; bunkr je poznat podle červeného světla.
+Bouřka (blesk a hrom v dálce) se vypíná konstantou `THUNDER` nahoře v `swamp.gd`. Autoři modelů: `assets/swamp/CREDITS.md`.
