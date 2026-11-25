@@ -1186,7 +1186,7 @@ func _make_flashlight(parent: Node3D) -> void:
 	flashlight.position = Vector3(0.12, -0.12, -0.1)
 	flashlight.light_color = Color(1.0, 0.9, 0.76)
 	# dosvítí jen pár metrů, pak se kužel ztratí v mlze a tmě
-	flashlight.light_energy = 12.0
+	flashlight.light_energy = 15.0
 	flashlight.spot_range = 17.0
 	flashlight.spot_angle = 36.0
 	flashlight.spot_angle_attenuation = 0.5
