@@ -273,20 +273,94 @@ func _noise_tex(size: int, freq: float, s: int) -> NoiseTexture2D:
 	nt.noise = fn
 	return nt
 
+## Voda: klasická voda z lázní (lom, pohlcování, zrcadlová kamera, vlny ze simulace brodění),
+## obarvená do kalné bažiny (shaders/swamp_water.gdshader).
+var water_mat: ShaderMaterial
+var sim: WaterSim
+var refl_vp: SubViewport
+var refl_cam: Camera3D
+
 func _build_water() -> void:
+	water_mat = ShaderMaterial.new()
+	water_mat.shader = load("res://shaders/swamp_water.gdshader")
+	water_mat.set_shader_parameter("weed_noise", _noise_tex(512, 0.012, seed_used + 9))
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(1200.0, 1200.0)
-	var sm := ShaderMaterial.new()
-	sm.shader = load("res://shaders/swamp_water.gdshader")
-	sm.set_shader_parameter("wave_normal", load("res://textures/water_normal.png"))
-	sm.set_shader_parameter("weed_noise", _noise_tex(512, 0.012, seed_used + 9))
-	pm.material = sm
+	pm.size = Vector2(2.0 * R + 8.0, 2.0 * R + 8.0)
+	pm.subdivide_width = 320            # jemná síť: vlny ze simulace hýbou i hladinou
+	pm.subdivide_depth = 320
 	var mi := MeshInstance3D.new()
 	mi.name = "Voda"
 	mi.mesh = pm
+	mi.material_override = water_mat
+	mi.layers = 2                       # vrstva 2: zrcadlová kamera vodu nevidí
 	mi.position.y = WATER_Y
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	add_child(mi)
+	_build_sim()
+	_build_reflection()
+
+## Simulace hladiny (scripts/water_sim.gd) přes celou bažinu, ostrůvky jsou v masce pevné.
+func _build_sim() -> void:
+	if RenderingServer.get_rendering_device() == null: return      # headless test bez GPU
+	sim = WaterSim.new()
+	sim.fit(Rect2(-R, -R, 2.0 * R, 2.0 * R))
+	add_child(sim)
+	var small := Image.create(_n, _n, false, Image.FORMAT_L8)
+	for iz in _n:
+		for ix in _n:
+			small.set_pixel(ix, iz, Color.WHITE if _hs[iz * _n + ix] < WATER_Y - 0.03 else Color.BLACK)
+	# maska v rozlišení simulace (terén má bod po metru, simulace po ~5 cm)
+	small.resize(sim.res, sim.res, Image.INTERPOLATE_BILINEAR)
+	small.convert(Image.FORMAT_R8)
+	sim.setup(small)
+	water_mat.set_shader_parameter("sim_tex", sim.texture)
+	water_mat.set_shader_parameter("sim_origin", sim.origin)
+	water_mat.set_shader_parameter("sim_size", sim.size)
+	water_mat.set_shader_parameter("sim_res", float(sim.res))
+
+## Zrcadlová kamera pro odraz na hladině (jako v lázních): odráží se, co osvítí baterka.
+func _build_reflection() -> void:
+	var renv: Environment = _env.duplicate()
+	renv.ssr_enabled = false
+	renv.ssao_enabled = false
+	renv.glow_enabled = false
+	renv.volumetric_fog_enabled = false
+	renv.adjustment_enabled = false
+	renv.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	renv.tonemap_exposure = 1.0
+	refl_vp = SubViewport.new()
+	refl_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	refl_vp.use_hdr_2d = true
+	refl_vp.positional_shadow_atlas_size = 0
+	refl_vp.mesh_lod_threshold = 6.0
+	refl_vp.msaa_3d = Viewport.MSAA_DISABLED
+	refl_vp.size = Vector2i(640, 360)
+	add_child(refl_vp)
+	refl_cam = Camera3D.new()
+	refl_cam.environment = renv
+	refl_cam.cull_mask = 0xFFFFF & ~2 & ~8 & ~(1 << 19)     # bez vody, vlastního těla a krve
+	refl_vp.add_child(refl_cam)
+	refl_cam.make_current()
+	water_mat.set_shader_parameter("refl_tex", refl_vp.get_texture())
+
+func _update_reflection() -> void:
+	if refl_cam == null or cam == null: return
+	var vs := get_viewport().get_visible_rect().size
+	var want := Vector2i(maxi(int(vs.x * 0.5), 64), maxi(int(vs.y * 0.5), 64))
+	if refl_vp.size != want: refl_vp.size = want
+	var ct := cam.global_transform
+	var b := ct.basis
+	var o := ct.origin
+	var mx := Vector3(b.x.x, -b.x.y, b.x.z)
+	var my := Vector3(b.y.x, -b.y.y, b.y.z)
+	var mz := Vector3(b.z.x, -b.z.y, b.z.z)
+	refl_cam.global_transform = Transform3D(Basis(mx, -my, mz), Vector3(o.x, 2.0 * WATER_Y - o.y, o.z))
+	refl_cam.fov = cam.fov
+	refl_cam.near = cam.near
+	refl_cam.far = 40.0
+	# kouká-li hráč vzhůru, hladinu nevidí: odraz se nekreslí
+	refl_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if -b.z.y < 0.6 else SubViewport.UPDATE_DISABLED
 
 # =================================================================== tma, déšť, mlha, bouřka
 
@@ -1368,6 +1442,7 @@ func _build_player() -> void:
 	preload("res://scripts/weapon_rig.gd").skip_gun_models = true
 	P.water_at = func(_p: Vector3) -> float: return WATER_Y
 	player = P.new()
+	player.sim = sim        # brodění dělá vlny na hladině
 	add_child(player)
 	player.mouse_scale = float(settings.mouse)
 	player.base_fov = float(settings.fov)
@@ -1458,6 +1533,7 @@ func _process(dt: float) -> void:
 	if _splash:
 		_splash.global_position = Vector3(eye.x, WATER_Y + 0.02, eye.z)
 	_update_post(dt)
+	_update_reflection()
 	_update_mists(dt, eye)
 	_update_visor_rain(dt)
 	if _visor_test: _run_visor_test()
@@ -1513,6 +1589,10 @@ func _run_shots() -> void:
 	for s0 in list:
 		var lit := s0.ends_with("!")        # "!" na konci = snímek ve chvíli blesku
 		var s := s0.trim_suffix("!")
+		var force_pitch := INF              # "@-30" = sklon pohledu ve stupních
+		if s.contains("@"):
+			force_pitch = deg_to_rad(float(s.get_slice("@", 1)))
+			s = s.get_slice("@", 0)
 		var pos: Vector3
 		var yaw: float
 		var pitch := -0.05
@@ -1541,8 +1621,10 @@ func _run_shots() -> void:
 			pos.y = maxf(ground(pos.x, pos.z), WATER_Y) + 1.65
 			yaw = deg_to_rad(float(v[2]))
 			pitch = deg_to_rad(float(v[3])) if v.size() > 3 else -0.05
+		if force_pitch != INF: pitch = force_pitch
 		cam.position = pos
 		cam.rotation = Vector3(pitch, yaw, 0)
+		if OS.get_environment("SWAMP_NOVHS") == "1": vhs_on = false
 		flashlight.visible = not s.begins_with("top")
 		_flash_t = -1.0
 		_moon.light_energy = 1.0 if lit else 0.0
