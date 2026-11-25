@@ -1,13 +1,10 @@
 shader_type spatial;
-// Voda bažiny: postavená na klasické vodě z lázní (shaders/water.gdshader), jen obarvená do kalné
-// hnědozelené břečky. Světlo do ní vniká a pohltí se (žádná šedá plocha pod baterkou),
-// dno je vidět jen u břehu. Odraz z zrcadlové kamery (planární), vlny ze simulace pohybu hráče
-// (brodění), navíc kroužky od deště, plující listí, okřehek a pěna.
-render_mode blend_mix, cull_back, depth_draw_never, specular_schlick_ggx, ambient_light_disabled, fog_disabled;
+// Voda bažiny: neprůhledná kalná břečka (pod hladinu nevidíš). Odrazy počítá zrcadlení obrazovky (SSR),
+// takže sedí přesně na tom, co je nad hladinou. Vlny ze simulace pohybu hráče (brodění, jako v lázních),
+// kroužky od deště, plující listí, okřehek a pěna. Voda sama skoro nesvítí: kužel baterky na ní
+// nedělá šedou plochu, vidíš jen odlesky a odrazy.
+render_mode cull_back, specular_schlick_ggx;
 
-uniform sampler2D screen_tex : hint_screen_texture, filter_linear, repeat_disable;
-uniform sampler2D depth_tex : hint_depth_texture, filter_nearest, repeat_disable;
-uniform sampler2D refl_tex : filter_linear, repeat_disable;
 uniform sampler2D sim_tex : filter_linear, repeat_disable;
 uniform sampler2D weed_noise : filter_linear_mipmap, repeat_enable;
 
@@ -15,13 +12,7 @@ uniform vec2 sim_origin = vec2(-80.0, -80.0);
 uniform float sim_size = 160.0;
 uniform float sim_res = 2048.0;
 uniform float height_scale = 0.05;
-uniform vec3 absorb = vec3(15.0, 12.0, 19.0);              // pohlcování na metr: kalná voda, dno jen u břehu
-uniform vec3 silt_color : source_color = vec3(0.009, 0.0075, 0.0035);   // kal ve vodě, osvětlí ho jen baterka
-uniform float refract_strength = 0.03;
-uniform float refl_distort = 0.035;
-uniform float planar_mix = 1.0;
-uniform vec3 fallback_refl : source_color = vec3(0.01, 0.012, 0.015);
-uniform float refl_gain = 0.45;
+uniform vec3 silt_color : source_color = vec3(0.006, 0.005, 0.0025);   // skoro černá kalná voda
 uniform float rain = 1.0;
 uniform vec3 weed_color : source_color = vec3(0.05, 0.065, 0.018);
 uniform vec3 scum_color : source_color = vec3(0.12, 0.11, 0.08);
@@ -83,11 +74,6 @@ void vertex() {
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
-vec3 view_pos(vec2 uv, float d, mat4 inv_proj) {
-	vec4 p = inv_proj * vec4(uv * 2.0 - 1.0, d, 1.0);
-	return p.xyz / p.w;
-}
-
 void fragment() {
 	// --- vlny: simulace (brodění) + kroužky od deště
 	float e = sim_size / sim_res;
@@ -111,48 +97,10 @@ void fragment() {
 	float solid = clamp(max(max(weed, l1), max(l2, scum)), 0.0, 1.0);
 	vec2 rip = ripples(wpos.xz, TIME) * rain * (1.0 - solid);
 	vec3 n = vec3(-(hr - hl) / (2.0 * e) * height_scale + rip.x * 0.06, 1.0, -(hu - hd) / (2.0 * e) * height_scale + rip.y * 0.06);
-	float dist = length(VERTEX);
-	n = normalize(n);
-	vec3 vn = normalize((VIEW_MATRIX * vec4(n, 0.0)).xyz);
-	vec3 vup = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
-	vec2 bend = vn.xy - vup.xy;
-	NORMAL = vn;
-
-	// --- hloubka vody ve směru pohledu
-	float z0 = textureLod(depth_tex, SCREEN_UV, 0.0).r;
-	vec3 p0 = view_pos(SCREEN_UV, z0, INV_PROJECTION_MATRIX);
-	float thick0 = max(length(p0) - dist, 0.0);
-
-	// --- lom: dno prosvítá jen tam, kde je mělko
-	vec2 ruv = SCREEN_UV + bend * vec2(1.0, -1.0) * refract_strength * clamp(thick0 * 3.0, 0.0, 1.0);
-	ruv = clamp(ruv, vec2(0.001), vec2(0.999));
-	float z1 = textureLod(depth_tex, ruv, 0.0).r;
-	float thick = length(view_pos(ruv, z1, INV_PROJECTION_MATRIX)) - dist;
-	if (thick < 0.0) { ruv = SCREEN_UV; thick = thick0; }
-	vec3 scene = textureLod(screen_tex, ruv, 0.0).rgb;
-	vec3 trans = exp(-absorb * thick);
-	vec3 refr = scene * trans;
-
-	// --- odraz (zrcadlová kamera)
-	vec2 suv = vec2(SCREEN_UV.x, 1.0 - SCREEN_UV.y) + bend * vec2(1.0, 1.0) * refl_distort;
-	suv = clamp(suv, vec2(0.001), vec2(0.999));
-	vec3 refl = mix(fallback_refl, textureLod(refl_tex, suv, 0.0).rgb * refl_gain, planar_mix);
-
-	float ndv = clamp(dot(vn, VIEW), 0.0, 1.0);
-	float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
-	vec3 col = mix(refr, refl, fres);
-
-	// měkký přechod tam, kde hladina protíná břeh
-	float edge = smoothstep(0.0, 0.025, thick0);
-	vec3 raw = textureLod(screen_tex, SCREEN_UV, 0.0).rgb;
-	vec3 emis = mix(raw, col, edge);
-
-	// kal ve vodě a plovoucí věci svítí jen tam, kam dopadne světlo (baterka, blesk)
+	NORMAL = normalize((VIEW_MATRIX * vec4(normalize(n), 0.0)).xyz);
 	float silt = 0.6 + 0.8 * texture(weed_noise, wpos.xz * 0.15 + vec2(0.7, 0.2)).r;
-	vec3 kal = silt_color * silt * (1.0 - trans.g) * edge;
-	ALBEDO = mix(kal, floatc, solid);
-	EMISSION = emis * (1.0 - solid);
+	ALBEDO = mix(silt_color * silt, floatc, solid);
 	METALLIC = 0.0;
-	ROUGHNESS = mix(0.035, 0.7, solid);
-	SPECULAR = mix(0.5, 0.2, solid) * edge;
+	ROUGHNESS = mix(0.03, 0.7, solid);
+	SPECULAR = mix(0.5, 0.2, solid);
 }

@@ -273,8 +273,8 @@ func _noise_tex(size: int, freq: float, s: int) -> NoiseTexture2D:
 	nt.noise = fn
 	return nt
 
-## Voda: klasická voda z lázní (lom, pohlcování, zrcadlová kamera, vlny ze simulace brodění),
-## obarvená do kalné bažiny (shaders/swamp_water.gdshader).
+## Voda: kalná neprůhledná hladina s vlnami ze simulace brodění (jako v lázních) a odrazy SSR
+## (shaders/swamp_water.gdshader).
 var water_mat: ShaderMaterial
 var sim: WaterSim
 var refl_vp: SubViewport
@@ -298,7 +298,8 @@ func _build_water() -> void:
 	mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	add_child(mi)
 	_build_sim()
-	_build_reflection()
+	# odrazy: zrcadlení obrazovky (SSR v prostředí). Zrcadlová kamera z lázní tu dělala chyby:
+	# v bažině je pod hladinou terén a ponořené kmeny, které se v ní objevovaly.
 
 ## Simulace hladiny (scripts/water_sim.gd) přes celou bažinu, ostrůvky jsou v masce pevné.
 func _build_sim() -> void:
@@ -399,10 +400,10 @@ func _build_environment() -> void:
 	_env.ssao_intensity = 1.4
 	# mokrá voda a kameny zrcadlí, co osvítí baterka
 	_env.ssr_enabled = true
-	_env.ssr_max_steps = 56
-	_env.ssr_fade_in = 0.15
-	_env.ssr_fade_out = 2.0
-	_env.ssr_depth_tolerance = 0.3
+	_env.ssr_max_steps = 64
+	_env.ssr_fade_in = 0.1
+	_env.ssr_fade_out = 1.5
+	_env.ssr_depth_tolerance = 0.25
 	# barevné podání: studené zelenomodré stíny, teplejší světla, víc kontrastu
 	_env.adjustment_enabled = true
 	_env.adjustment_contrast = 1.12
@@ -1536,7 +1537,6 @@ func _process(dt: float) -> void:
 	if _splash:
 		_splash.global_position = Vector3(eye.x, WATER_Y + 0.02, eye.z)
 	_update_post(dt)
-	_update_reflection()
 	_update_mists(dt, eye)
 	_update_visor_rain(dt)
 	if _visor_test: _run_visor_test()
