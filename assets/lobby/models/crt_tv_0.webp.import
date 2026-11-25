@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://csi0tqkm4g37i"
-path="res://.godot/imported/crt_tv_0.webp-452e30cb32d19c1efeeb67fc83f66b3d.ctex"
+path.s3tc="res://.godot/imported/crt_tv_0.webp-452e30cb32d19c1efeeb67fc83f66b3d.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "ddbfc9eacc49b8850a8c850b6c70ac9e"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/lobby/models/crt_tv_0.webp"
-dest_files=["res://.godot/imported/crt_tv_0.webp-452e30cb32d19c1efeeb67fc83f66b3d.ctex"]
+dest_files=["res://.godot/imported/crt_tv_0.webp-452e30cb32d19c1efeeb67fc83f66b3d.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0
