@@ -579,8 +579,12 @@ func _load_variants() -> void:
 			if key in ["dead", "ancient", "white", "oak", "pine"]:
 				# strom stojí na patě kmene, ne na nejnižším kořenu / převislé větvi
 				base = _trunk_base(g, bb)
+				# starý pokroucený strom stojí na dlouhých kořenech jako na chůdách: zabořit hlouběji
+				if key == "ancient": base.y += bb.size.y * 0.22
 				height = bb.end.y - base.y
 			var s := 1.0 / maxf(height, 0.0001)
+			if OS.get_environment("SWAMP_VARIANTS") == "1":
+				print("varianta ", key, " #", vs.size(), " vyska ", snappedf(bb.size.y, 0.01), " pata nad minimem ", snappedf((base.y - bb.position.y) / bb.size.y, 0.01), " sirka ", snappedf(maxf(bb.size.x, bb.size.z) / bb.size.y, 0.01))
 			var norm := Transform3D(Basis.from_scale(Vector3.ONE * s), -base * s)
 			var ps := []
 			for p in g: ps.append([p[0], norm * (p[1] as Transform3D)])
