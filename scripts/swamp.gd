@@ -1227,6 +1227,13 @@ func _build_post() -> void:
 		bodycam.setup(self, rect, post_mat)
 		player.cam_fx = bodycam
 		_set_bodycam(bool(settings.bodycam))
+		# VISOR (experiment, scripts/visor.gd): hledí helmy, na které postupně napadá déšť; otírá se klávesou H
+		visor = load("res://scripts/visor.gd").new()
+		add_child(visor)
+		visor.setup(self, post_layer, player)
+		visor.set_enabled(true)
+		visor.auto_wipe = false
+		visor.mat.set_shader_parameter("dark_drops", 1.0)
 
 ## Bodycam s vlastní expozicí pro bažinu: ve tmě obraz nezesvětluje (tma má zůstat tmou).
 func _set_bodycam(v: bool) -> void:
@@ -1271,6 +1278,56 @@ func _update_mists(dt: float, eye: Vector3) -> void:
 		if off.length() > 34.0:
 			var a := rng.randf() * TAU
 			fv.position = eye + Vector3(cos(a), 0, sin(a)) * rng.randf_range(10.0, 26.0)
+
+
+# ------------------------------------------------------------------ déšť na hledí
+
+var visor: Node
+const VISOR_FULL := 40.0          # za kolik sekund deště je hledí úplně pokapané
+var _visor_seen_wipes := 0
+var _visor_hint_t := 0.0
+
+## Kapky deště na hledí: přibývají postupně (víc a víc kapek, větší stékají dolů).
+## Po otření (H) se sklo vyčistí a začne pršet na čisté.
+func _update_visor_rain(dt: float) -> void:
+	if visor == null or not visor.active(): return
+	var rig: Node = player.body.weapon if player.body else null
+	var wiping: bool = rig != null and float(rig.wipe) > 0.0
+	if visor._wipes != _visor_seen_wipes and not wiping:
+		# otření doběhlo: nová vrstva kapek začíná od nuly
+		_visor_seen_wipes = visor._wipes
+		visor._wet = 0.0
+		visor._wet_k = float(visor._wipes)
+		visor._wet_seed = rng.randf() * 100.0
+		visor._wet_t = visor._now
+	if not wiping and not player.swimming:
+		# visor sám kapky pomalu suší (dt / 22), déšť přidává rychleji
+		visor._wet = minf(1.0, visor._wet + dt / 22.0 + dt / VISOR_FULL)
+		visor._dirty_t = visor._now
+	_visor_hint_t -= dt
+	if visor._wet > 0.6 and _visor_hint_t <= 0.0 and _toast_t <= 0.0:
+		_visor_hint_t = 45.0
+		_say("Hledí je celé od deště. H = otřít.")
+
+
+## Test hledí (SWAMP_VISOR_TEST=1 a SWAMP_OUT): rychle napadá déšť, snímek, otření, snímky, konec.
+var _visor_test := OS.get_environment("SWAMP_VISOR_TEST") == "1"
+var _vt_step := 0
+
+func _run_visor_test() -> void:
+	if visor == null: return
+	var out := OS.get_environment("SWAMP_OUT")
+	if _time < 5.0:
+		visor._wet = minf(1.0, visor._wet + 0.02)
+	var marks := [5.0, 5.35, 5.7, 7.5]
+	if _vt_step < marks.size() and _time >= marks[_vt_step]:
+		if _vt_step == 0:
+			get_viewport().get_texture().get_image().save_png(out + "/visor_0.png")
+			visor.wipe()
+		else:
+			get_viewport().get_texture().get_image().save_png(out + "/visor_%d.png" % _vt_step)
+		_vt_step += 1
+		if _vt_step == marks.size(): get_tree().quit()
 
 
 func _update_post(dt: float) -> void:
@@ -1335,8 +1392,8 @@ func _build_hud() -> void:
 	cl.layer = 20            # nad postprocesem (VHS / bodycam)
 	add_child(cl)
 	_toast = Label.new()
-	_toast.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_toast.position = Vector2(-450, -140)
+	_toast.set_anchors_preset(Control.PRESET_CENTER_TOP)       # nahoře: dole je datum VHS
+	_toast.position = Vector2(-450, 90)
 	_toast.size = Vector2(900, 40)
 	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_toast.add_theme_font_size_override("font_size", 22)
@@ -1351,7 +1408,7 @@ func _build_hud() -> void:
 	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cl.add_child(dot)
 	if OS.get_environment("SWAMP_SHOTS") == "":
-		_say("Bažina (prototyp). Najdi bunkr s červeným světlem. F baterka, V VHS, B bodycam, Esc menu.")
+		_say("Bažina (prototyp). Najdi bunkr s červeným světlem. F baterka, H otřít hledí, V VHS, B bodycam, Esc menu.")
 
 func _say(t: String) -> void:
 	_toast.text = t
@@ -1365,6 +1422,8 @@ func _input(event: InputEvent) -> void:
 			KEY_ESCAPE:
 				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 				get_tree().change_scene_to_file("res://main.tscn")
+			KEY_H:
+				if visor and visor.enabled: visor.wipe()
 			KEY_V:
 				vhs_on = not vhs_on
 				_say("VHS kamera: " + ("zapnuto" if vhs_on else "vypnuto"))
@@ -1400,6 +1459,8 @@ func _process(dt: float) -> void:
 		_splash.global_position = Vector3(eye.x, WATER_Y + 0.02, eye.z)
 	_update_post(dt)
 	_update_mists(dt, eye)
+	_update_visor_rain(dt)
+	if _visor_test: _run_visor_test()
 	# bouřka: občas blesk v dálce, hrom se zpožděním
 	if THUNDER:
 		_thunder_t -= dt

@@ -287,5 +287,6 @@ kam svítí baterka (F). Všude kalná voda po kolena, ostrůvky, hlubší tůn�
 Mapa se při každém spuštění vygeneruje jinak (pevný seed pro test: proměnná prostředí `SWAMP_SEED=123`).
 Od místa výsadku vede k polozatopenému sovětskému bunkru rozpadlá lávka a cedule; bunkr je poznat podle červeného světla.
 Bouřka (blesk a hrom v dálce) se vypíná konstantou `THUNDER` nahoře v `swamp.gd`.
-V bažině je od začátku zapnutá bodycam (B) a VHS kamera (V). Stromy, keře a kameny mají shader mokré vegetace
+V bažině je od začátku zapnutá bodycam (B), VHS kamera (V) a hledí helmy: déšť na něj postupně napadá
+(za ~40 s je celé pokapané) a otírá se klávesou H (ruka přejede po skle, pak začne pršet na čisté). Stromy, keře a kameny mají shader mokré vegetace
 (`shaders/swamp_foliage.gdshader`: přebarvení, lesk a kapky deště, prosvítání listů, vítr). Autoři modelů: `assets/swamp/CREDITS.md`.

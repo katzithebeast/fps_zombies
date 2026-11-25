@@ -24,6 +24,7 @@ uniform float breath = 0.0;       // právě vydechuje (0..1)
 uniform float frame_amt = 1.0;    // rám hledí
 uniform vec3 tint = vec3(1.0);    // barva hledí (velmi slabě)
 uniform float smudge = 0.35;
+uniform float dark_drops = 0.0;     // 1 = lesk kapek jen ve světle (bažina v noci)
 uniform float wipe_now = 0.0;     // právě se otírá (0..1) – šmouhy se roztírají
 
 float hash(vec2 p) {
@@ -148,7 +149,9 @@ void fragment() {
 		float edge = smoothstep(0.75, 0.95, length(drop_n)) * step(0.01, drop_h);
 		col *= 1.0 - edge * 0.35 * smoothstep(-0.2, 0.6, drop_n.y);
 		float spec = pow(max(0.0, dot(normalize(vec3(-drop_n, 0.6)), normalize(vec3(-0.4, -0.6, 0.7)))), 18.0);
-		col += spec * 0.35 * drop_h;
+		// ve tmě se kapky nelesknou (lesk jen tam, kde je za sklem světlo; dark_drops = 1 v bažině)
+		float lit = smoothstep(0.0, 0.25, dot(textureLod(screen_mip, uv, 3.0).rgb, vec3(0.333)));
+		col += spec * 0.35 * drop_h * mix(1.0, lit, dark_drops);
 	}
 
 	// --- krev ze zadní strany: prosvítá rudě, silná vrstva je skoro černá
