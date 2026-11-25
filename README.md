@@ -287,6 +287,8 @@ kam svítí baterka (F). Všude kalná voda po kolena, ostrůvky, hlubší tůn�
 Mapa se při každém spuštění vygeneruje jinak (pevný seed pro test: proměnná prostředí `SWAMP_SEED=123`).
 Od místa výsadku vede k polozatopenému sovětskému bunkru rozpadlá lávka a cedule; bunkr je poznat podle červeného světla.
 Bouřka (blesk a hrom v dálce) se vypíná konstantou `THUNDER` nahoře v `swamp.gd`.
+Test boje (`scripts/swamp_waves.gd`): AK-47, MP 40, IŽ-54 a Desert Eagle (1–4 nebo kolečko, nekonečná zásoba),
+vlny zombie z hlavní hry (kola, víc a rychlejší), zdraví hráče, po smrti znovu od 1. kola. `SWAMP_DEBUG=1` vypisuje stav kol.
 V bažině je od začátku zapnutá bodycam (B), VHS kamera (V) a hledí helmy: déšť na něj postupně napadá
 (za ~40 s je celé pokapané) a otírá se klávesou H (ruka přejede po skle, pak začne pršet na čisté). Stromy, keře a kameny mají shader mokré vegetace
 (`shaders/swamp_foliage.gdshader`: přebarvení, lesk a kapky deště, prosvítání listů, vítr). Autoři modelů: `assets/swamp/CREDITS.md`.

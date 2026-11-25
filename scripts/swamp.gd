@@ -67,6 +67,8 @@ var _red_lamp: OmniLight3D
 var _red_mesh: MeshInstance3D
 var _time := 0.0
 var _moon: DirectionalLight3D
+var sfx: Sfx
+var waves: Node
 
 func _ready() -> void:
 	add_to_group("swamp_main")
@@ -108,6 +110,10 @@ func _ready() -> void:
 	_build_splashes()
 	_build_post()
 	_build_hud()
+	if player:
+		waves = load("res://scripts/swamp_waves.gd").new()
+		add_child(waves)
+		waves.setup(self)
 	if OS.get_environment("SWAMP_SHOTS") != "":
 		_run_shots.call_deferred()
 
@@ -1082,6 +1088,10 @@ func _loop(s: AudioStream) -> AudioStream:
 	return s
 
 func _build_sound() -> void:
+	sfx = Sfx.new()           # zvuky boje z hlavní hry (zásahy, zombie, kola)
+	add_child(sfx)
+	sfx.set_zone("outdoor")
+	sfx.music_volume = 0.22
 	var bed := AudioStreamPlayer.new()
 	bed.stream = _loop(load("res://audio/swamp/night_bed.wav"))
 	bed.volume_db = -17.0
@@ -1448,8 +1458,8 @@ func _build_player() -> void:
 		_make_flashlight(cam)
 		return
 	var P := preload("res://scripts/player.gd")
-	preload("res://scripts/weapon_rig.gd").skip_gun_models = true
-	P.water_at = func(_p: Vector3) -> float: return WATER_Y
+	preload("res://scripts/weapon_rig.gd").skip_gun_models = false      # se zbraněmi
+	P.water_at = Callable()                # hladina je všude stejná (WATER_Y = 0)
 	player = P.new()
 	player.sim = sim        # brodění dělá vlny na hladině
 	add_child(player)
@@ -1459,8 +1469,11 @@ func _build_player() -> void:
 	player.teleport(Vector3(spawn.x, _spawn_y(), spawn.z), look_at_goal, -0.05)
 	cam = player.camera
 	cam.far = 400.0
-	for f in ["set_process", "set_physics_process", "set_process_input", "set_process_unhandled_input"]:
-		player.weapon.call(f, false)
+	player.collision_mask = 1 | 128      # zombie jsou pevná překážka
+	# zbraně na test: všechny, nekonečná zásoba (přepínání 1–4 nebo kolečkem)
+	for g in ["izh54", "deagle", "mp40", "ak"]:
+		player.weapon.give(g, g == "ak")
+	player.weapon.refill()
 	player.footstep.connect(_on_footstep)
 	player.splashed.connect(_on_splash)
 	_make_flashlight(cam)
@@ -1470,6 +1483,7 @@ func _build_player() -> void:
 func _exit_tree() -> void:
 	preload("res://scripts/weapon_rig.gd").skip_gun_models = false
 	preload("res://scripts/player.gd").water_at = Callable()
+	preload("res://scripts/swamp_waves.gd").reset_statics()      # statické háčky zombie nesmí ukazovat do zrušené bažiny
 
 func _build_hud() -> void:
 	var cl := CanvasLayer.new()
@@ -1492,7 +1506,7 @@ func _build_hud() -> void:
 	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cl.add_child(dot)
 	if OS.get_environment("SWAMP_SHOTS") == "":
-		_say("Bažina (prototyp). Najdi bunkr s červeným světlem. F baterka, H otřít hledí, V VHS, B bodycam, Esc menu.")
+		_say("Bažina: přežij vlny zombie. Střelba LMB, míření RMB, R přebít, Q úder, 1–4 zbraně, F baterka, H hledí, Esc menu.")
 
 func _say(t: String) -> void:
 	_toast.text = t
@@ -1508,6 +1522,10 @@ func _input(event: InputEvent) -> void:
 				get_tree().change_scene_to_file("res://main.tscn")
 			KEY_H:
 				if visor and visor.enabled: visor.wipe()
+			KEY_1, KEY_2, KEY_3, KEY_4:
+				if player:
+					var order := ["ak", "mp40", "izh54", "deagle"]
+					player.weapon.switch_to(order[event.physical_keycode - KEY_1])
 			KEY_V:
 				vhs_on = not vhs_on
 				_say("VHS kamera: " + ("zapnuto" if vhs_on else "vypnuto"))
