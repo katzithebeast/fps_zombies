@@ -394,6 +394,8 @@ func _build_environment() -> void:
 	_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	_env.ambient_light_color = Color(0.03, 0.035, 0.05)
 	_env.ambient_light_energy = 0.1
+	if OS.get_environment("SWAMP_BRIGHT") == "1":      # jen náhledy: vidět všechno
+		_env.ambient_light_energy = 4.0
 	_env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	_env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	_env.tonemap_exposure = 1.15
@@ -573,7 +575,12 @@ func _load_variants() -> void:
 				bb = b if first else bb.merge(b)
 				first = false
 			var base := Vector3(bb.get_center().x, bb.position.y, bb.get_center().z)
-			var s := 1.0 / maxf(bb.size.y, 0.0001)
+			var height := bb.size.y
+			if key in ["dead", "ancient", "white", "oak", "pine"]:
+				# strom stojí na patě kmene, ne na nejnižším kořenu / převislé větvi
+				base = _trunk_base(g, bb)
+				height = bb.end.y - base.y
+			var s := 1.0 / maxf(height, 0.0001)
 			var norm := Transform3D(Basis.from_scale(Vector3.ONE * s), -base * s)
 			var ps := []
 			for p in g: ps.append([p[0], norm * (p[1] as Transform3D)])
@@ -581,6 +588,34 @@ func _load_variants() -> void:
 		_variants[key] = vs
 		inst.queue_free()
 	tmp.queue_free()
+
+## Pata kmene: těžiště spodní čtvrtiny modelu (kmen) a nejnižší bod blízko jeho osy.
+## Kořeny nebo větve, které sahají níž a stranou, se pak zaboří do země místo aby strom visel.
+func _trunk_base(parts: Array, bb: AABB) -> Vector3:
+	var pts := PackedVector3Array()
+	for p in parts:
+		var m: Mesh = p[0]
+		var xf: Transform3D = p[1]
+		for si in m.get_surface_count():
+			var v: PackedVector3Array = m.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]
+			var step := maxi(1, v.size() / 6000)
+			for i in range(0, v.size(), step): pts.append(xf * v[i])
+	var h := bb.size.y
+	var c := Vector2.ZERO
+	var n := 0
+	for q in pts:
+		if q.y < bb.position.y + h * 0.3:
+			c += Vector2(q.x, q.z)
+			n += 1
+	if n == 0: return Vector3(bb.get_center().x, bb.position.y, bb.get_center().z)
+	c /= n
+	var r := h * 0.07
+	var y := INF
+	for q in pts:
+		if Vector2(q.x, q.z).distance_to(c) < r: y = minf(y, q.y)
+	if y == INF: y = bb.position.y
+	return Vector3(c.x, y, c.y)
+
 
 ## Vítr podle druhu (tráva se houpe nejvíc, stromy skoro vůbec).
 const SWAY := {"grass": 0.14, "plant": 0.1, "fern": 0.09, "pbush": 0.06, "ancient": 0.03, "oak": 0.03, "pine": 0.02, "dead": 0.015}
@@ -778,81 +813,193 @@ func _mat(key: String, meters: float, tint := Color.WHITE) -> StandardMaterial3D
 	_mats[id] = m
 	return m
 
+## Prkno 1,5 × 0,05 × 0,24 m s vlastním mapováním (léta dřeva podél prkna).
+func _plank_mesh() -> ArrayMesh:
+	var L := 1.5
+	var T := 0.05
+	var Wd := 0.24
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var hx := L * 0.5
+	var hy := T * 0.5
+	var hz := Wd * 0.5
+	# [normála, 4 rohy (proti směru hodin při pohledu zvenku), uv rohů]
+	var faces := [
+		[Vector3.UP, [Vector3(-hx, hy, -hz), Vector3(hx, hy, -hz), Vector3(hx, hy, hz), Vector3(-hx, hy, hz)]],
+		[Vector3.DOWN, [Vector3(-hx, -hy, hz), Vector3(hx, -hy, hz), Vector3(hx, -hy, -hz), Vector3(-hx, -hy, -hz)]],
+		[Vector3.BACK, [Vector3(-hx, hy, hz), Vector3(hx, hy, hz), Vector3(hx, -hy, hz), Vector3(-hx, -hy, hz)]],
+		[Vector3.FORWARD, [Vector3(hx, hy, -hz), Vector3(-hx, hy, -hz), Vector3(-hx, -hy, -hz), Vector3(hx, -hy, -hz)]],
+		[Vector3.RIGHT, [Vector3(hx, hy, hz), Vector3(hx, hy, -hz), Vector3(hx, -hy, -hz), Vector3(hx, -hy, hz)]],
+		[Vector3.LEFT, [Vector3(-hx, hy, -hz), Vector3(-hx, hy, hz), Vector3(-hx, -hy, hz), Vector3(-hx, -hy, -hz)]],
+	]
+	for f in faces:
+		var n: Vector3 = f[0]
+		var c: Array = f[1]
+		var uvs := []
+		for v in c:
+			var p: Vector3 = v
+			if absf(n.y) > 0.5: uvs.append(Vector2((p.x + hx) / L, (p.z + hz) / Wd))
+			elif absf(n.z) > 0.5: uvs.append(Vector2((p.x + hx) / L, (p.y + hy) / T * 0.2))
+			else: uvs.append(Vector2((p.z + hz) / Wd * 0.16, (p.y + hy) / T * 0.2))
+		for idx in [0, 1, 2, 0, 2, 3]:
+			st.set_normal(n)
+			st.set_uv(uvs[idx])
+			st.add_vertex(c[idx])
+	st.generate_tangents()
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = load(TX + "plank_albedo.jpg")
+	m.normal_enabled = true
+	m.normal_texture = load(TX + "plank_normal.jpg")
+	m.roughness_texture = load(TX + "plank_rough.jpg")
+	m.vertex_color_use_as_albedo = true      # každé prkno trochu jiný odstín
+	var mesh := st.commit()
+	mesh.surface_set_material(0, m)
+	return mesh
+
+## Rozpadlá lávka: kusy prken na kůlech, mezi nimi se brodí. Konce kusů se lámou šikmo
+## do vody, takže na lávku vyjde hráč i zombie (navigační síť počítá i se šikmými konci).
+var _ramps := []        # konce kusů lávky [místo, směr ven] (náhledy)
+
 func _build_boardwalk() -> void:
-	var wood := _mat("old_wood", 1.6, Color(0.62, 0.58, 0.52))
-	var plank := BoxMesh.new()
-	plank.size = Vector3(1.5, 0.05, 0.24)
-	plank.material = wood
-	var post := BoxMesh.new()
-	post.size = Vector3(0.12, 1.0, 0.12)
-	post.material = wood
+	var plank := _plank_mesh()
 	var planks := []
+	var tints := []
 	var posts := []
 	var root := StaticBody3D.new()
 	root.name = "Lavka"
 	add_child(root)
-	# vzdálenost podél cesty
+	# vzorky podél cesty po 0,3 m
+	var samples := []
 	var acc := 0.0
-	var next_plank := 0.0
-	var next_post := 0.0
-	var seg_start := -1
-	var tops := []
+	var next_s := 0.0
 	for i in range(1, path.size()):
 		var p0 := path[i - 1]
 		var p1 := path[i]
 		var d := p0.distance_to(p1)
 		var dir := (p1 - p0) / d
-		while next_plank <= acc + d:
-			var t := (next_plank - acc) / d
-			var p := p0.lerp(p1, t)
+		while next_s <= acc + d:
+			var p := p0.lerp(p1, (next_s - acc) / d)
 			var gy := ground(p.x, p.y)
-			var top := maxf(gy + 0.08, WATER_Y + 0.26 + detail.get_noise_2d(p.x * 3.0, p.y * 3.0) * 0.06)
-			# z lávky zbyly jen kusy (mezi nimi se brodí)
-			var piece := detail.get_noise_2d(next_plank * 0.06, 77.0) > 0.05
-			if gy < 0.3 and piece:
-				tops.append([p, dir, top])
-				if rng.randf() > 0.06:
-					var yaw := atan2(dir.x, dir.y)
-					var b := Basis(Vector3.UP, yaw)
-					b = Basis(b.z, rng.randf_range(-0.05, 0.05)) * b
-					planks.append(Transform3D(b, Vector3(p.x, top - 0.025, p.y)))
-				if next_plank >= next_post:
-					next_post = next_plank + 1.8
-					var side := Vector2(-dir.y, dir.x) * 0.68
-					for sgn in [-1.0, 1.0]:
-						var q: Vector2 = p + side * sgn
-						var bot := ground(q.x, q.y) - 0.4
-						var len := top - bot + rng.randf_range(0.05, 0.4)
-						posts.append(Transform3D(Basis.from_scale(Vector3(1, len, 1)), Vector3(q.x, bot + len * 0.5, q.y)))
-			next_plank += 0.3
+			var top := maxf(gy + 0.08, WATER_Y + 0.24 + detail.get_noise_2d(p.x * 3.0, p.y * 3.0) * 0.05)
+			var piece := detail.get_noise_2d(next_s * 0.5, 77.0) > -0.08 and gy < 0.3
+			samples.append({"p": p, "dir": dir, "top": top, "on": piece})
+			next_s += 0.3
 		acc += d
-	# kolize lávky: kvádry po 1.5 m podél prken
-	for i in range(0, tops.size(), 5):
-		var p: Vector2 = tops[i][0]
-		var j := mini(i + 5, tops.size() - 1)
-		var q: Vector2 = tops[j][0]
-		var mid := (p + q) * 0.5
-		if p.distance_to(q) > 1.9:      # mezera mezi kusy lávky: jen krátký kus
-			q = p
-			mid = p
-		var len := maxf(p.distance_to(q), 0.3) + 0.3
-		var dir: Vector2 = (q - p).normalized() if q != p else tops[i][1]
-		var top: float = (tops[i][2] + tops[j][2]) * 0.5
-		var cs := CollisionShape3D.new()
-		var bs := BoxShape3D.new()
-		bs.size = Vector3(1.5, 0.3, len)
-		cs.shape = bs
-		cs.transform = Transform3D(Basis(Vector3.UP, atan2(dir.x, dir.y)), Vector3(mid.x, top - 0.15, mid.y))
-		root.add_child(cs)
-	for pair in [[plank, planks], [post, posts]]:
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.mesh = pair[0]
-		mm.instance_count = pair[1].size()
-		for i in pair[1].size(): mm.set_instance_transform(i, pair[1][i])
-		var mmi := MultiMeshInstance3D.new()
-		mmi.multimesh = mm
-		root.add_child(mmi)
+	# souvislé kusy lávky
+	var runs := []
+	var cur := []
+	for smp in samples:
+		if smp.on: cur.append(smp)
+		elif not cur.is_empty():
+			runs.append(cur)
+			cur = []
+	if not cur.is_empty(): runs.append(cur)
+	var add_plank := func(pos: Vector3, yaw: float, pitch: float, chance: float) -> void:
+		if rng.randf() > chance: return
+		var b := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch) * Basis(Vector3.FORWARD, rng.randf_range(-0.04, 0.04))
+		planks.append(Transform3D(b, pos + Vector3(rng.randf_range(-0.04, 0.04), 0, 0)))
+		var k := rng.randf_range(0.72, 1.08)
+		tints.append(Color(k, k * rng.randf_range(0.96, 1.02), k * rng.randf_range(0.9, 1.0)))
+	for run in runs:
+		if run.size() < 4: continue
+		for i in run.size():
+			var smp: Dictionary = run[i]
+			var yaw := atan2(smp.dir.x, smp.dir.y)
+			add_plank.call(Vector3(smp.p.x, smp.top - 0.025, smp.p.y), yaw, 0.0, 0.94)
+			if i % 6 == 0:
+				var side: Vector2 = Vector2(-smp.dir.y, smp.dir.x) * 0.68
+				for sgn in [-1.0, 1.0]:
+					var q: Vector2 = smp.p + side * sgn
+					var bot := ground(q.x, q.y) - 0.4
+					var len: float = smp.top - bot + rng.randf_range(0.05, 0.35)
+					posts.append(Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.BACK, PI * 0.5) * Basis.from_scale(Vector3(len / 1.5, 2.4, 0.5)),
+						Vector3(q.x, bot + len * 0.5, q.y)))
+		# kolize kusu: kvádry po 5 vzorcích (bez mezer)
+		for i in range(0, run.size(), 5):
+			var a: Dictionary = run[i]
+			var bsm: Dictionary = run[mini(i + 5, run.size() - 1)]
+			var pa: Vector2 = a.p
+			var pb: Vector2 = bsm.p
+			var dirc: Vector2 = (pb - pa).normalized() if pb != pa else a.dir
+			var cs := CollisionShape3D.new()
+			var bs := BoxShape3D.new()
+			bs.size = Vector3(1.5, 0.3, pa.distance_to(pb) + 0.35)
+			cs.shape = bs
+			var mid := (pa + pb) * 0.5
+			cs.transform = Transform3D(Basis(Vector3.UP, atan2(dirc.x, dirc.y)), Vector3(mid.x, (a.top + bsm.top) * 0.5 - 0.15, mid.y))
+			root.add_child(cs)
+		# konce: prkna se šikmo lámou do vody
+		for end_i in [0, run.size() - 1]:
+			var e: Dictionary = run[end_i]
+			var out: Vector2 = -e.dir if end_i == 0 else e.dir
+			var yaw := atan2(out.x, out.y)
+			var start := Vector3(e.p.x, e.top, e.p.y)
+			var tip2: Vector2 = e.p + out * 2.1
+			var low := ground(tip2.x, tip2.y) + 0.03
+			var drop: float = maxf(e.top - low, 0.05)
+			var ang := atan2(drop, 2.1)
+			var steps := 7
+			for k in range(1, steps + 1):
+				var t := float(k) / steps
+				var q: Vector2 = e.p + out * 2.1 * t
+				add_plank.call(Vector3(q.x, e.top - drop * t - 0.025, q.y), yaw, ang, 0.8)
+			_ramps.append([start, out])
+			var cs := CollisionShape3D.new()
+			var bs := BoxShape3D.new()
+			var ramp_len := sqrt(2.1 * 2.1 + drop * drop)
+			bs.size = Vector3(1.5, 0.2, ramp_len)
+			cs.shape = bs
+			var bas := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, ang)
+			var center := start + Vector3(out.x, 0, out.y) * 1.05 + Vector3(0, -drop * 0.5, 0)
+			cs.transform = Transform3D(bas, center - bas.y * 0.1)
+			root.add_child(cs)
+	print("Bažina: lávka kusů ", runs.size(), " konců ", _ramps.size(), " prken ", planks.size())
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = plank
+	mm.instance_count = planks.size()
+	for i in planks.size():
+		mm.set_instance_transform(i, planks[i])
+		mm.set_instance_color(i, tints[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	root.add_child(mmi)
+	var pm := MultiMesh.new()
+	pm.transform_format = MultiMesh.TRANSFORM_3D
+	pm.use_colors = true
+	pm.mesh = plank
+	pm.instance_count = posts.size()
+	for i in posts.size():
+		pm.set_instance_transform(i, posts[i])
+		pm.set_instance_color(i, Color(0.6, 0.58, 0.54))
+	var pmi := MultiMeshInstance3D.new()
+	pmi.multimesh = pm
+	root.add_child(pmi)
+
+## Vylézání na nízké okraje (lávka, kámen, kmen) do 0,9 m: když hráč tlačí do překážky,
+## pod kterou je nahoře volno, vytáhne se nahoru (i z vody).
+func _step_up() -> void:
+	if player == null or not player.control_enabled or player.swimming: return
+	var hv := Vector3(player.velocity.x, 0, player.velocity.z)
+	var wish := Vector3.ZERO
+	if Input.is_physical_key_pressed(KEY_W): wish += Basis(Vector3.UP, player.yaw) * Vector3.FORWARD
+	if wish == Vector3.ZERO: wish = hv
+	if wish.length() < 0.1 or not player.is_on_wall(): return
+	var f := Vector3(wish.x, 0, wish.z).normalized()
+	if f.dot(-player.get_wall_normal()) < 0.3: return
+	var feet := player.global_position
+	var space := get_world_3d().direct_space_state
+	var from := feet + f * 0.55 + Vector3.UP * 1.2
+	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 1.2, 1)
+	var hit := space.intersect_ray(q)
+	if hit.is_empty(): return
+	var rise: float = hit.position.y - feet.y
+	if rise > 0.12 and rise < 0.92:
+		player.velocity.y = maxf(player.velocity.y, 2.2 + rise * 2.0)
+
+func _physics_process(_dt: float) -> void:
+	_step_up()
 
 func _box(parent: Node3D, size: Vector3, pos: Vector3, mat: Material, collide := true, rot := Vector3.ZERO) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
@@ -1637,6 +1784,15 @@ func _run_shots() -> void:
 			var d := path[k + 1] - path[k - 1]
 			pos = Vector3(p.x, maxf(ground(p.x, p.y), WATER_Y + 0.3) + 1.65, p.y)
 			yaw = atan2(-d.x, -d.y)
+		elif s.begins_with("ramp") and not _ramps.is_empty():
+			var r: Array = _ramps[int(s.substr(4)) % _ramps.size()]
+			var o: Vector2 = r[1]
+			var st: Vector3 = r[0]
+			pos = st + Vector3(o.x, 0, o.y) * 5.0 + Vector3(-o.y, 0, o.x) * 1.5
+			pos.y = maxf(ground(pos.x, pos.z), WATER_Y) + 1.65
+			var tgt := st + Vector3(o.x, 0, o.y) * 1.0
+			yaw = atan2(-(tgt.x - pos.x), -(tgt.z - pos.z))
+			pitch = -0.25
 		elif s.begins_with("top"):
 			pos = Vector3(0, 70, R * 0.9)
 			yaw = 0.0
@@ -1655,7 +1811,7 @@ func _run_shots() -> void:
 		_flash_t = -1.0
 		_moon.light_energy = 1.0 if lit else 0.0
 		_sky_mat.set_shader_parameter("flash", 0.8 if lit else 0.0)
-		_env.ambient_light_energy = 0.5 if lit else 0.1
+		_env.ambient_light_energy = 0.5 if lit else (4.0 if OS.get_environment("SWAMP_BRIGHT") == "1" else 0.1)
 		_thunder_t = 9999.0
 		for f in 40: await get_tree().process_frame
 		get_viewport().get_texture().get_image().save_png(out + "/sw_%d.png" % i)
