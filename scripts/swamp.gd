@@ -329,6 +329,9 @@ func _build_reflection() -> void:
 	renv.adjustment_enabled = false
 	renv.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	renv.tonemap_exposure = 1.0
+	renv.fog_density = 0.14          # v odrazu se vzdálené věci ztratí ve tmě dřív
+	renv.fog_light_color = Color(0, 0, 0)
+	renv.fog_sky_affect = 1.0
 	refl_vp = SubViewport.new()
 	refl_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	refl_vp.use_hdr_2d = true
@@ -358,7 +361,7 @@ func _update_reflection() -> void:
 	refl_cam.global_transform = Transform3D(Basis(mx, -my, mz), Vector3(o.x, 2.0 * WATER_Y - o.y, o.z))
 	refl_cam.fov = cam.fov
 	refl_cam.near = cam.near
-	refl_cam.far = 40.0
+	refl_cam.far = 18.0
 	# kouká-li hráč vzhůru, hladinu nevidí: odraz se nekreslí
 	refl_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if -b.z.y < 0.6 else SubViewport.UPDATE_DISABLED
 
@@ -415,11 +418,11 @@ func _build_environment() -> void:
 	_env.adjustment_color_correction = gt
 	_env.fog_enabled = true
 	_env.fog_light_color = Color(0.002, 0.0025, 0.003)
-	_env.fog_density = 0.032
+	_env.fog_density = 0.05
 	_env.fog_sky_affect = 0.85
 	# hustá vlhká mlha: kužel baterky v ní je vidět
 	_env.volumetric_fog_enabled = OS.get_environment("SWAMP_LITE") != "1"
-	_env.volumetric_fog_density = 0.035
+	_env.volumetric_fog_density = 0.045
 	_env.volumetric_fog_albedo = Color(0.26, 0.28, 0.28)
 	_env.volumetric_fog_emission = Color(0, 0, 0)
 	_env.volumetric_fog_anisotropy = 0.15
@@ -614,10 +617,10 @@ func _fix_materials(mesh: Mesh, key: String) -> void:
 			sm.set_shader_parameter("bright", 0.72)
 			sm.set_shader_parameter("base_rough", 0.55)
 		else:
-			# kůra: tmavá, nasáklá vodou
+			# kůra: tmavá, nasáklá vodou (bílý suchý strom ztmavený, ať ve tmě nesvítí)
 			sm.set_shader_parameter("grade", Color(0.82, 0.8, 0.74))
 			sm.set_shader_parameter("saturation", 0.85)
-			sm.set_shader_parameter("bright", 0.62)
+			sm.set_shader_parameter("bright", 0.3 if key == "white" else 0.48)
 			sm.set_shader_parameter("base_rough", 0.75)
 		_materials_done[m] = sm
 		mesh.surface_set_material(s, sm)
@@ -1179,10 +1182,10 @@ func _make_flashlight(parent: Node3D) -> void:
 	flashlight.light_color = Color(1.0, 0.9, 0.76)
 	# dosvítí jen pár metrů, pak se kužel ztratí v mlze a tmě
 	flashlight.light_energy = 16.0
-	flashlight.spot_range = 22.0
+	flashlight.spot_range = 17.0
 	flashlight.spot_angle = 36.0
 	flashlight.spot_angle_attenuation = 0.5
-	flashlight.spot_attenuation = 1.35
+	flashlight.spot_attenuation = 1.9
 	flashlight.light_projector = _flash_cookie()
 	flashlight.shadow_enabled = true
 	flashlight.shadow_blur = 1.2
