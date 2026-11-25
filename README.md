@@ -286,4 +286,6 @@ Menu → **The swamp (prototype)**, scéna `swamp.tscn`, kód `scripts/swamp.gd`
 kam svítí baterka (F). Všude kalná voda po kolena, ostrůvky, hlubší tůně, suché stromy, keře, rákos a kameny.
 Mapa se při každém spuštění vygeneruje jinak (pevný seed pro test: proměnná prostředí `SWAMP_SEED=123`).
 Od místa výsadku vede k polozatopenému sovětskému bunkru rozpadlá lávka a cedule; bunkr je poznat podle červeného světla.
-Bouřka (blesk a hrom v dálce) se vypíná konstantou `THUNDER` nahoře v `swamp.gd`. Autoři modelů: `assets/swamp/CREDITS.md`.
+Bouřka (blesk a hrom v dálce) se vypíná konstantou `THUNDER` nahoře v `swamp.gd`.
+V bažině je od začátku zapnutá bodycam (B) a VHS kamera (V). Stromy, keře a kameny mají shader mokré vegetace
+(`shaders/swamp_foliage.gdshader`: přebarvení, lesk a kapky deště, prosvítání listů, vítr). Autoři modelů: `assets/swamp/CREDITS.md`.

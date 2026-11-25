@@ -1,11 +1,11 @@
 shader_type spatial;
 // Kalná stojatá voda bažiny: hnědozelená, neprůhledná (nevidíš, co je pod tebou),
-// v dešti plná kroužků od kapek. Svítí v ní jen odlesk baterky.
-render_mode blend_mix, cull_disabled, depth_draw_opaque, specular_schlick_ggx;
+// v dešti plná kroužků od kapek. Neprůhledná, takže v ní funguje zrcadlení obrazovky (SSR):
+// odráží se v ní, co osvítí baterka.
+render_mode cull_disabled, specular_schlick_ggx;
 
 uniform sampler2D wave_normal : hint_normal, filter_linear_mipmap, repeat_enable;
 uniform sampler2D weed_noise : filter_linear_mipmap, repeat_enable;
-uniform sampler2D DEPTH_TEXTURE : hint_depth_texture, filter_linear_mipmap;
 uniform vec3 murk_color : source_color = vec3(0.05, 0.045, 0.028);
 uniform vec3 weed_color : source_color = vec3(0.07, 0.09, 0.025);
 uniform float weed_amount = 0.55;
@@ -53,16 +53,10 @@ void fragment() {
 	float w2 = texture(weed_noise, uv * 0.4 + vec2(0.3, 0.1)).r;
 	float weed = smoothstep(1.0 - weed_amount * 0.55, 1.0 - weed_amount * 0.4, w) * smoothstep(0.25, 0.6, w2);
 	float silt = texture(weed_noise, uv * 0.15 + vec2(0.7, 0.2)).r;
-	// u břehu o něco průhlednější
-	float depth = texture(DEPTH_TEXTURE, SCREEN_UV).r;
-	vec4 p = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, depth, 1.0);
-	p.xyz /= p.w;
-	float thick = clamp(VERTEX.z - p.z, 0.0, 10.0);
 	ALBEDO = mix(murk_color * (0.75 + silt * 0.5), weed_color, weed);
-	ROUGHNESS = mix(0.06, 0.8, weed);
+	ROUGHNESS = mix(0.035, 0.8, weed);
 	SPECULAR = mix(0.5, 0.2, weed);
 	METALLIC = 0.0;
 	NORMAL_MAP = n * 0.5 + 0.5;
 	NORMAL_MAP_DEPTH = 1.0;
-	ALPHA = max(clamp(0.8 + thick * 1.5, 0.8, 0.985), weed);
 }

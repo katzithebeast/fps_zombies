@@ -38,8 +38,8 @@ void fragment() {
 	vec3 nm = mix(texture(mud_normal, uv_m).rgb, texture(soil_normal, uv_s).rgb, dry);
 	// mokro: u vody a pod ní tmavší a lesklé
 	float wet = 1.0 - smoothstep(-0.05, 0.4 + n * 0.3, h);
-	alb *= mix(1.0, 0.45, wet);
-	float rough = mix(orm.g, 0.18, wet);
+	alb *= mix(0.78, 0.45, wet);           // prší: i suchá místa jsou nasáklá
+	float rough = mix(mix(orm.g, 0.38, 0.55), 0.12, wet);
 	ALBEDO = alb;
 	ROUGHNESS = clamp(rough, 0.05, 1.0);
 	AO = orm.r;

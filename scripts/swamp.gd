@@ -28,7 +28,7 @@ const MODELS := {
 	"rock": ["river_rocks.glb", "each"],
 }
 
-var settings := {"mouse": 1.0, "fov": 75.0, "volume": 0.8, "bob": 1.0}
+var settings := {"mouse": 1.0, "fov": 75.0, "volume": 0.8, "bob": 1.0, "bodycam": true, "bodycam_blur": 1.0, "contrast": 1.0, "gamma": 1.0}
 var rng := RandomNumberGenerator.new()
 var seed_used := 0
 var noise := FastNoiseLite.new()
@@ -104,6 +104,8 @@ func _ready() -> void:
 	_build_wisps()
 	_build_sound()
 	_build_player()
+	_build_splashes()
+	_build_post()
 	_build_hud()
 	if OS.get_environment("SWAMP_SHOTS") != "":
 		_run_shots.call_deferred()
@@ -316,15 +318,34 @@ func _build_environment() -> void:
 	_env.glow_hdr_threshold = 0.9
 	_env.ssao_enabled = true
 	_env.ssao_radius = 0.8
-	_env.ssao_intensity = 1.2
+	_env.ssao_intensity = 1.4
+	# mokrá voda a kameny zrcadlí, co osvítí baterka
+	_env.ssr_enabled = true
+	_env.ssr_max_steps = 56
+	_env.ssr_fade_in = 0.15
+	_env.ssr_fade_out = 2.0
+	_env.ssr_depth_tolerance = 0.3
+	# barevné podání: studené zelenomodré stíny, teplejší světla, víc kontrastu
+	_env.adjustment_enabled = true
+	_env.adjustment_contrast = 1.12
+	_env.adjustment_saturation = 1.05
+	var g := Gradient.new()
+	g.set_color(0, Color(0.0, 0.012, 0.018))
+	g.set_color(1, Color(1.0, 0.97, 0.9))
+	g.add_point(0.18, Color(0.13, 0.17, 0.17))
+	g.add_point(0.55, Color(0.56, 0.57, 0.52))
+	var gt := GradientTexture1D.new()
+	gt.gradient = g
+	gt.width = 256
+	_env.adjustment_color_correction = gt
 	_env.fog_enabled = true
 	_env.fog_light_color = Color(0.004, 0.005, 0.007)
 	_env.fog_density = 0.035
 	_env.fog_sky_affect = 0.6
 	# hustá vlhká mlha: kužel baterky v ní je vidět
 	_env.volumetric_fog_enabled = OS.get_environment("SWAMP_LITE") != "1"
-	_env.volumetric_fog_density = 0.045
-	_env.volumetric_fog_albedo = Color(0.55, 0.6, 0.64)
+	_env.volumetric_fog_density = 0.03
+	_env.volumetric_fog_albedo = Color(0.42, 0.46, 0.48)
 	_env.volumetric_fog_emission = Color(0, 0, 0)
 	_env.volumetric_fog_anisotropy = 0.2
 	_env.volumetric_fog_length = 60.0
@@ -350,8 +371,8 @@ func _build_environment() -> void:
 	fv.size = Vector3(2.0 * R + 20.0, 2.2, 2.0 * R + 20.0)
 	fv.position.y = 0.5
 	var fm := FogMaterial.new()
-	fm.density = 0.06
-	fm.albedo = Color(0.6, 0.64, 0.68)
+	fm.density = 0.045
+	fm.albedo = Color(0.5, 0.54, 0.56)
 	fm.height_falloff = 0.9
 	fm.edge_fade = 0.3
 	var nt3 := NoiseTexture3D.new()
@@ -370,12 +391,12 @@ func _build_environment() -> void:
 ## Déšť kolem hráče: tenké kapky, které jsou vidět hlavně v kuželu baterky.
 func _build_rain() -> void:
 	var qm := QuadMesh.new()
-	qm.size = Vector2(0.012, 0.42)
+	qm.size = Vector2(0.009, 0.42)
 	var m := StandardMaterial3D.new()
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
 	m.billboard_keep_scale = true
-	m.albedo_color = Color(0.6, 0.64, 0.7, 0.22)
+	m.albedo_color = Color(0.6, 0.64, 0.7, 0.16)
 	m.roughness = 0.25
 	m.disable_receive_shadows = true
 	qm.material = m
@@ -389,7 +410,7 @@ func _build_rain() -> void:
 	pm.gravity = Vector3(0, -6.0, 0)
 	_rain = GPUParticles3D.new()
 	_rain.name = "Dest"
-	_rain.amount = 5000
+	_rain.amount = 7000
 	_rain.lifetime = 0.9
 	_rain.preprocess = 1.0
 	_rain.local_coords = false
@@ -444,7 +465,7 @@ func _load_variants() -> void:
 			for s in m.mesh.get_surface_count():
 				var ov := m.get_surface_override_material(s)
 				if ov: m.mesh.surface_set_material(s, ov)
-			_fix_materials(m.mesh)
+			_fix_materials(m.mesh, key)
 			parts.append([m.mesh, m.global_transform])
 		var groups := []
 		match mode:
@@ -471,21 +492,59 @@ func _load_variants() -> void:
 		inst.queue_free()
 	tmp.queue_free()
 
-## Listí a tráva: místo průhlednosti ořez podle alfy (správné stíny a hloubka, levnější).
-func _fix_materials(mesh: Mesh) -> void:
+## Vítr podle druhu (tráva se houpe nejvíc, stromy skoro vůbec).
+const SWAY := {"grass": 0.14, "plant": 0.1, "fern": 0.09, "pbush": 0.06, "ancient": 0.03, "oak": 0.03, "pine": 0.02, "dead": 0.015}
+var _foliage_shader: Shader
+var _drip_tex: NoiseTexture2D
+
+## Původní materiály modelů nahradí shaderem mokré vegetace (shaders/swamp_foliage.gdshader).
+func _fix_materials(mesh: Mesh, key: String) -> void:
+	if _foliage_shader == null:
+		_foliage_shader = load("res://shaders/swamp_foliage.gdshader")
+		_drip_tex = _noise_tex(256, 0.06, seed_used + 21)
 	for s in mesh.get_surface_count():
 		var m := mesh.surface_get_material(s)
-		if m == null or _materials_done.has(m): continue
-		_materials_done[m] = true
-		if m is BaseMaterial3D:
-			var bm := m as BaseMaterial3D
-			if bm.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
-				bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-				bm.alpha_scissor_threshold = 0.4
-				bm.cull_mode = BaseMaterial3D.CULL_DISABLED
-			if bm.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED:
-				bm.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
-			bm.roughness = maxf(bm.roughness, 0.6)
+		if m == null: continue
+		if _materials_done.has(m):
+			mesh.surface_set_material(s, _materials_done[m])
+			continue
+		if not (m is BaseMaterial3D):
+			_materials_done[m] = m
+			continue
+		var bm := m as BaseMaterial3D
+		var leaf := bm.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
+		var rock := key == "rock" or key == "boulder"
+		var sm := ShaderMaterial.new()
+		sm.shader = _foliage_shader
+		sm.set_shader_parameter("albedo_tex", bm.albedo_texture)
+		sm.set_shader_parameter("albedo_color", bm.albedo_color)
+		sm.set_shader_parameter("use_alpha", leaf)
+		sm.set_shader_parameter("alpha_cut", 0.4)
+		if bm.normal_enabled and bm.normal_texture:
+			sm.set_shader_parameter("normal_tex", bm.normal_texture)
+			sm.set_shader_parameter("has_normal", true)
+		sm.set_shader_parameter("drip_noise", _drip_tex)
+		sm.set_shader_parameter("leaf", 1.0 if leaf else 0.0)
+		sm.set_shader_parameter("sway", float(SWAY.get(key, 0.0)) if leaf else 0.0)
+		if rock:
+			sm.set_shader_parameter("grade", Color(0.9, 0.9, 0.86))
+			sm.set_shader_parameter("saturation", 0.75)
+			sm.set_shader_parameter("bright", 0.7)
+			sm.set_shader_parameter("base_rough", 0.6)
+		elif leaf:
+			# listí: zemitější, méně křiklavé (bažina, podzim, déšť)
+			sm.set_shader_parameter("grade", Color(0.88, 0.9, 0.66))
+			sm.set_shader_parameter("saturation", 0.78)
+			sm.set_shader_parameter("bright", 0.72)
+			sm.set_shader_parameter("base_rough", 0.55)
+		else:
+			# kůra: tmavá, nasáklá vodou
+			sm.set_shader_parameter("grade", Color(0.82, 0.8, 0.74))
+			sm.set_shader_parameter("saturation", 0.85)
+			sm.set_shader_parameter("bright", 0.62)
+			sm.set_shader_parameter("base_rough", 0.75)
+		_materials_done[m] = sm
+		mesh.surface_set_material(s, sm)
 
 func _place(key: String, pos: Vector3, h: float, yaw: float, tilt := 0.0, vis := 80.0, shadow := true, variant := -1) -> Dictionary:
 	var vs: Array = _variants[key]
@@ -845,6 +904,7 @@ func _build_barrels() -> void:
 			gl.light_color = Color(0.4, 1.0, 0.4)
 			gl.light_energy = 0.5
 			gl.omni_range = 3.5
+			gl.light_volumetric_fog_energy = 0.3
 			gl.position = Vector3(p.x, WATER_Y + 0.3, p.y)
 			add_child(gl)
 
@@ -917,7 +977,7 @@ func _build_wisps() -> void:
 		l.light_color = Color(0.55, 0.95, 0.88)
 		l.light_energy = 0.9
 		l.omni_range = 7.0
-		l.light_volumetric_fog_energy = 3.0
+		l.light_volumetric_fog_energy = 0.6
 		root.add_child(l)
 		var mi := MeshInstance3D.new()
 		mi.mesh = sm
@@ -1015,32 +1075,174 @@ func _on_splash(strength: float) -> void:
 func _load_settings() -> void:
 	var cf := ConfigFile.new()
 	if cf.load("user://settings.cfg") == OK:
-		for k in settings:
+		for k in ["mouse", "fov", "volume", "bob", "bodycam_blur"]:
 			if cf.has_section_key("s", k): settings[k] = float(cf.get_value("s", k))
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(float(settings.volume), 0.001)))
 
+## Kužel baterky jako u skutečné svítilny: horké jádro, světlejší kroužek od reflektoru,
+## měkký okraj a drobné nerovnosti skla.
+func _flash_cookie() -> ImageTexture:
+	var n := 256
+	var img := Image.create(n, n, false, Image.FORMAT_RGB8)
+	var fn := FastNoiseLite.new()
+	fn.frequency = 0.05
+	for y in n:
+		for x in n:
+			var d := Vector2(x - n * 0.5 + 0.5, y - n * 0.5 + 0.5).length() / (n * 0.5)
+			var core := exp(-d * d * 4.5)
+			var ring := exp(-pow((d - 0.5) / 0.08, 2.0)) * 0.3
+			var halo := (1.0 - smoothstep(0.4, 1.0, d)) * 0.45
+			var v := (core + ring + halo) * (0.92 + 0.08 * fn.get_noise_2d(x, y))
+			v *= 1.0 - smoothstep(0.88, 1.0, d)
+			img.set_pixel(x, y, Color(v, v, v))
+	return ImageTexture.create_from_image(img)
+
 func _make_flashlight(parent: Node3D) -> void:
 	flashlight = SpotLight3D.new()
-	flashlight.position = Vector3(0.16, -0.14, -0.15)
-	flashlight.light_color = Color(1.0, 0.88, 0.68)
-	flashlight.light_energy = 11.0
+	flashlight.position = Vector3(0.12, -0.12, -0.1)
+	flashlight.light_color = Color(1.0, 0.9, 0.76)
+	flashlight.light_energy = 24.0
 	flashlight.spot_range = 36.0
-	flashlight.spot_angle = 30.0
-	flashlight.spot_angle_attenuation = 3.0
-	flashlight.spot_attenuation = 0.9
+	flashlight.spot_angle = 40.0
+	flashlight.spot_angle_attenuation = 0.4
+	flashlight.spot_attenuation = 1.1
+	flashlight.light_projector = _flash_cookie()
 	flashlight.shadow_enabled = true
-	flashlight.shadow_blur = 1.5
+	flashlight.shadow_blur = 1.2
 	flashlight.shadow_caster_mask = 0xFFFFF & ~(4 | 8)
-	flashlight.light_volumetric_fog_energy = 0.9
+	flashlight.light_volumetric_fog_energy = 0.35
+	flashlight.light_specular = 0.8
 	parent.add_child(flashlight)
+	# kapky deště v kuželu: kolem baterky se rozzáří, dál zmizí ve tmě
 	var spill := SpotLight3D.new()
 	spill.light_color = flashlight.light_color
-	spill.light_energy = 0.7
-	spill.spot_range = 16.0
-	spill.spot_angle = 60.0
+	spill.light_energy = 0.35
+	spill.spot_range = 12.0
+	spill.spot_angle = 55.0
 	spill.spot_angle_attenuation = 1.5
-	spill.light_volumetric_fog_energy = 0.2
+	spill.light_volumetric_fog_energy = 0.0
+	spill.shadow_enabled = false
 	flashlight.add_child(spill)
+
+## Cákance kapek na hladině kolem hráče (osvětlené baterkou).
+var _splash: GPUParticles3D
+
+func _build_splashes() -> void:
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.035, 0.05)
+	var m := StandardMaterial3D.new()
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.albedo_color = Color(0.75, 0.78, 0.8, 0.45)
+	m.roughness = 0.2
+	qm.material = m
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(9.0, 0.0, 9.0)
+	pm.direction = Vector3(0, 1, 0)
+	pm.spread = 30.0
+	pm.initial_velocity_min = 0.5
+	pm.initial_velocity_max = 1.2
+	pm.gravity = Vector3(0, -9.0, 0)
+	var c := Curve.new()
+	c.add_point(Vector2(0.0, 1.0))
+	c.add_point(Vector2(1.0, 0.2))
+	var ct := CurveTexture.new()
+	ct.curve = c
+	pm.scale_curve = ct
+	_splash = GPUParticles3D.new()
+	_splash.amount = 1400
+	_splash.lifetime = 0.25
+	_splash.local_coords = false
+	_splash.process_material = pm
+	_splash.draw_pass_1 = qm
+	_splash.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_splash.visibility_aabb = AABB(Vector3(-10, -1, -10), Vector3(20, 3, 20))
+	_splash.position = Vector3(spawn.x, WATER_Y + 0.02, spawn.z)
+	add_child(_splash)
+
+# ------------------------------------------------------------------ postproces: bodycam a VHS
+
+var cam_attr: CameraAttributesPractical
+var post_mat: ShaderMaterial
+var bodycam: Node
+var vhs_on := true
+var _vhs := 1.0
+var _osd: Control
+var _osd_time: Label
+var _osd_sp: Label
+
+func _osd_label(parent: Node, text: String, size: int) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	l.add_theme_constant_override("shadow_offset_x", 2)
+	l.add_theme_constant_override("shadow_offset_y", 2)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(l)
+	return l
+
+func _build_post() -> void:
+	cam_attr = CameraAttributesPractical.new()
+	cam_attr.dof_blur_far_enabled = true
+	cam_attr.dof_blur_far_distance = 18.0
+	cam_attr.dof_blur_far_transition = 22.0
+	cam_attr.dof_blur_near_enabled = true
+	cam_attr.dof_blur_near_distance = 0.28
+	cam_attr.dof_blur_near_transition = 0.25
+	cam_attr.dof_blur_amount = 0.06
+	cam.attributes = cam_attr
+	# OSD videokamery (pod postprocesem, deformuje se s obrazem)
+	var osd_layer := CanvasLayer.new()
+	osd_layer.layer = 5
+	add_child(osd_layer)
+	_osd = Control.new()
+	_osd.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_osd.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	osd_layer.add_child(_osd)
+	_osd_label(_osd, "PLAY ►", 46).position = Vector2(230, 150)
+	_osd_sp = _osd_label(_osd, "SP", 46)
+	_osd_time = _osd_label(_osd, "", 46)
+	var post_layer := CanvasLayer.new()
+	post_layer.layer = 10
+	add_child(post_layer)
+	var rect := ColorRect.new()
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	post_mat = ShaderMaterial.new()
+	post_mat.shader = load("res://shaders/post.gdshader")
+	post_mat.set_shader_parameter("grain", 0.05)
+	post_mat.set_shader_parameter("vignette", 0.42)
+	post_mat.set_shader_parameter("vhs", _vhs)
+	rect.material = post_mat
+	post_layer.add_child(rect)
+	if player:
+		# BODYCAM (experiment, scripts/bodycam.gd): kamera na helmě, zapnutá od začátku
+		bodycam = load("res://scripts/bodycam.gd").new()
+		add_child(bodycam)
+		bodycam.setup(self, rect, post_mat)
+		player.cam_fx = bodycam
+		bodycam.set_enabled(bool(settings.bodycam))
+
+func _update_post(dt: float) -> void:
+	if post_mat == null: return
+	_vhs = move_toward(_vhs, 1.0 if vhs_on else 0.0, dt * 2.5)
+	post_mat.set_shader_parameter("vhs", _vhs)
+	if player: player.handheld = _vhs
+	_osd.visible = _vhs > 0.5
+	if _osd.visible:
+		var d := Time.get_datetime_dict_from_system()
+		var months := ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+		# na kazetě je pořád rok 1994
+		var h: int = d.hour % 12
+		_osd_time.text = "%s %d:%02d\n%s. %d %d" % ["PM" if d.hour >= 12 else "AM", 12 if h == 0 else h, d.minute, months[d.month - 1], d.day, 1994]
+	var vs := get_viewport().get_visible_rect().size
+	var sc := vs.y / 1080.0
+	_osd.scale = Vector2(sc, sc)
+	_osd_sp.position = Vector2(vs.x / sc - 330.0, 150.0)
+	_osd_time.position = Vector2(230.0, 1080.0 - 290.0)
+	cam_attr.dof_blur_amount = lerpf(0.06, 0.085, _vhs)
 
 func _spawn_y() -> float:
 	return ground(spawn.x, spawn.z) + 0.05
@@ -1082,6 +1284,7 @@ func _exit_tree() -> void:
 
 func _build_hud() -> void:
 	var cl := CanvasLayer.new()
+	cl.layer = 20            # nad postprocesem (VHS / bodycam)
 	add_child(cl)
 	_toast = Label.new()
 	_toast.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
@@ -1100,7 +1303,7 @@ func _build_hud() -> void:
 	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cl.add_child(dot)
 	if OS.get_environment("SWAMP_SHOTS") == "":
-		_say("Bažina (prototyp). Drž se lávky až k bunkru. F baterka, Esc zpět do menu.")
+		_say("Bažina (prototyp). Najdi bunkr s červeným světlem. F baterka, V VHS, B bodycam, Esc menu.")
 
 func _say(t: String) -> void:
 	_toast.text = t
@@ -1114,6 +1317,13 @@ func _input(event: InputEvent) -> void:
 			KEY_ESCAPE:
 				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 				get_tree().change_scene_to_file("res://main.tscn")
+			KEY_V:
+				vhs_on = not vhs_on
+				_say("VHS kamera: " + ("zapnuto" if vhs_on else "vypnuto"))
+			KEY_B:
+				settings.bodycam = not bool(settings.bodycam)
+				if bodycam: bodycam.set_enabled(bool(settings.bodycam))
+				_say("Bodycam (experiment): " + ("zapnuto" if settings.bodycam else "vypnuto"))
 			KEY_F:
 				if flashlight:
 					flashlight.visible = not flashlight.visible
@@ -1138,6 +1348,9 @@ func _process(dt: float) -> void:
 	var eye := cam.global_position if cam else spawn
 	if _rain:
 		_rain.global_position = eye + Vector3(0, 11.0, 0)
+	if _splash:
+		_splash.global_position = Vector3(eye.x, WATER_Y + 0.02, eye.z)
+	_update_post(dt)
 	# bouřka: občas blesk v dálce, hrom se zpožděním
 	if THUNDER:
 		_thunder_t -= dt
@@ -1148,7 +1361,7 @@ func _process(dt: float) -> void:
 			_flash_t += dt
 			var f := _flash_level()
 			_moon.light_energy = f * 0.5
-			_sky_mat.set_shader_parameter("flash", f * 0.6)
+			_sky_mat.set_shader_parameter("flash", f * 0.4)
 			_env.ambient_light_energy = 0.1 + f * 0.25
 	# bludičky: pomalu krouží nad vodou a zhasnou, když se přiblížíš
 	for w in _wisps:
@@ -1223,7 +1436,7 @@ func _run_shots() -> void:
 		flashlight.visible = not s.begins_with("top")
 		_flash_t = -1.0
 		_moon.light_energy = 1.0 if lit else 0.0
-		_sky_mat.set_shader_parameter("flash", 1.2 if lit else 0.0)
+		_sky_mat.set_shader_parameter("flash", 0.8 if lit else 0.0)
 		_env.ambient_light_energy = 0.5 if lit else 0.1
 		_thunder_t = 9999.0
 		for f in 40: await get_tree().process_frame
