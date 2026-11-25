@@ -101,6 +101,7 @@ func _ready() -> void:
 	_build_signs()
 	_build_bounds()
 	_build_rain()
+	_build_mist_banks()
 	_build_wisps()
 	_build_sound()
 	_build_player()
@@ -339,16 +340,17 @@ func _build_environment() -> void:
 	gt.width = 256
 	_env.adjustment_color_correction = gt
 	_env.fog_enabled = true
-	_env.fog_light_color = Color(0.004, 0.005, 0.007)
-	_env.fog_density = 0.035
-	_env.fog_sky_affect = 0.6
+	_env.fog_light_color = Color(0.002, 0.0025, 0.003)
+	_env.fog_density = 0.032
+	_env.fog_sky_affect = 0.85
 	# hustá vlhká mlha: kužel baterky v ní je vidět
 	_env.volumetric_fog_enabled = OS.get_environment("SWAMP_LITE") != "1"
-	_env.volumetric_fog_density = 0.03
-	_env.volumetric_fog_albedo = Color(0.42, 0.46, 0.48)
+	_env.volumetric_fog_density = 0.035
+	_env.volumetric_fog_albedo = Color(0.26, 0.28, 0.28)
 	_env.volumetric_fog_emission = Color(0, 0, 0)
-	_env.volumetric_fog_anisotropy = 0.2
-	_env.volumetric_fog_length = 60.0
+	_env.volumetric_fog_anisotropy = 0.15
+	_env.volumetric_fog_length = 36.0
+	_env.volumetric_fog_detail_spread = 1.5
 	_env.volumetric_fog_ambient_inject = 0.05
 	_env.volumetric_fog_sky_affect = 0.0
 	var we := WorldEnvironment.new()
@@ -371,8 +373,8 @@ func _build_environment() -> void:
 	fv.size = Vector3(2.0 * R + 20.0, 2.2, 2.0 * R + 20.0)
 	fv.position.y = 0.5
 	var fm := FogMaterial.new()
-	fm.density = 0.045
-	fm.albedo = Color(0.5, 0.54, 0.56)
+	fm.density = 0.05
+	fm.albedo = Color(0.32, 0.34, 0.34)
 	fm.height_falloff = 0.9
 	fm.edge_fade = 0.3
 	var nt3 := NoiseTexture3D.new()
@@ -1101,23 +1103,24 @@ func _make_flashlight(parent: Node3D) -> void:
 	flashlight = SpotLight3D.new()
 	flashlight.position = Vector3(0.12, -0.12, -0.1)
 	flashlight.light_color = Color(1.0, 0.9, 0.76)
-	flashlight.light_energy = 24.0
-	flashlight.spot_range = 36.0
-	flashlight.spot_angle = 40.0
-	flashlight.spot_angle_attenuation = 0.4
-	flashlight.spot_attenuation = 1.1
+	# dosvítí jen pár metrů, pak se kužel ztratí v mlze a tmě
+	flashlight.light_energy = 16.0
+	flashlight.spot_range = 22.0
+	flashlight.spot_angle = 36.0
+	flashlight.spot_angle_attenuation = 0.5
+	flashlight.spot_attenuation = 1.35
 	flashlight.light_projector = _flash_cookie()
 	flashlight.shadow_enabled = true
 	flashlight.shadow_blur = 1.2
 	flashlight.shadow_caster_mask = 0xFFFFF & ~(4 | 8)
-	flashlight.light_volumetric_fog_energy = 0.35
+	flashlight.light_volumetric_fog_energy = 0.3
 	flashlight.light_specular = 0.8
 	parent.add_child(flashlight)
 	# kapky deště v kuželu: kolem baterky se rozzáří, dál zmizí ve tmě
 	var spill := SpotLight3D.new()
 	spill.light_color = flashlight.light_color
-	spill.light_energy = 0.35
-	spill.spot_range = 12.0
+	spill.light_energy = 0.3
+	spill.spot_range = 7.0
 	spill.spot_angle = 55.0
 	spill.spot_angle_attenuation = 1.5
 	spill.light_volumetric_fog_energy = 0.0
@@ -1129,16 +1132,16 @@ var _splash: GPUParticles3D
 
 func _build_splashes() -> void:
 	var qm := QuadMesh.new()
-	qm.size = Vector2(0.035, 0.05)
+	qm.size = Vector2(0.014, 0.02)
 	var m := StandardMaterial3D.new()
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.albedo_color = Color(0.75, 0.78, 0.8, 0.45)
+	m.albedo_color = Color(0.5, 0.52, 0.54, 0.3)
 	m.roughness = 0.2
 	qm.material = m
 	var pm := ParticleProcessMaterial.new()
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	pm.emission_box_extents = Vector3(9.0, 0.0, 9.0)
+	pm.emission_box_extents = Vector3(6.0, 0.0, 6.0)
 	pm.direction = Vector3(0, 1, 0)
 	pm.spread = 30.0
 	pm.initial_velocity_min = 0.5
@@ -1151,8 +1154,8 @@ func _build_splashes() -> void:
 	ct.curve = c
 	pm.scale_curve = ct
 	_splash = GPUParticles3D.new()
-	_splash.amount = 1400
-	_splash.lifetime = 0.25
+	_splash.amount = 700
+	_splash.lifetime = 0.16
 	_splash.local_coords = false
 	_splash.process_material = pm
 	_splash.draw_pass_1 = qm
@@ -1223,7 +1226,52 @@ func _build_post() -> void:
 		add_child(bodycam)
 		bodycam.setup(self, rect, post_mat)
 		player.cam_fx = bodycam
-		bodycam.set_enabled(bool(settings.bodycam))
+		_set_bodycam(bool(settings.bodycam))
+
+## Bodycam s vlastní expozicí pro bažinu: ve tmě obraz nezesvětluje (tma má zůstat tmou).
+func _set_bodycam(v: bool) -> void:
+	if bodycam == null: return
+	bodycam.set_enabled(v)
+	if v and cam_attr:
+		cam_attr.auto_exposure_scale = 0.12
+		cam_attr.auto_exposure_min_sensitivity = 50.0
+		cam_attr.auto_exposure_max_sensitivity = 80.0
+
+# ------------------------------------------------------------------ cáry mlhy
+
+## Hustší chuchvalce mlhy, které pomalu putují kolem hráče. Ve tmě nejsou vidět,
+## ukáže je až baterka (nebo blesk).
+var _mists := []
+
+func _build_mist_banks() -> void:
+	for i in 14:
+		var fv := FogVolume.new()
+		fv.shape = RenderingServer.FOG_VOLUME_SHAPE_ELLIPSOID
+		fv.size = Vector3(rng.randf_range(7.0, 16.0), rng.randf_range(1.2, 2.6), rng.randf_range(7.0, 16.0))
+		var fm := FogMaterial.new()
+		fm.density = rng.randf_range(0.12, 0.28)
+		fm.albedo = Color(0.42, 0.45, 0.46)
+		fm.height_falloff = 0.6
+		fm.edge_fade = 0.9
+		fv.material = fm
+		var a := rng.randf() * TAU
+		var d := rng.randf_range(4.0, 30.0)
+		fv.position = spawn + Vector3(cos(a) * d, 0.7, sin(a) * d)
+		add_child(fv)
+		_mists.append({"node": fv, "v": Vector3(cos(a + 1.3), 0, sin(a + 1.3)) * rng.randf_range(0.15, 0.4), "ph": rng.randf() * TAU})
+
+func _update_mists(dt: float, eye: Vector3) -> void:
+	for m in _mists:
+		var fv: FogVolume = m.node
+		fv.position += (m.v as Vector3) * dt
+		fv.position.y = 0.7 + sin(_time * 0.2 + m.ph) * 0.25
+		# daleko od hráče: přesune se zase kousek před něj (náhodně kolem)
+		var off := fv.position - eye
+		off.y = 0.0
+		if off.length() > 34.0:
+			var a := rng.randf() * TAU
+			fv.position = eye + Vector3(cos(a), 0, sin(a)) * rng.randf_range(10.0, 26.0)
+
 
 func _update_post(dt: float) -> void:
 	if post_mat == null: return
@@ -1322,7 +1370,7 @@ func _input(event: InputEvent) -> void:
 				_say("VHS kamera: " + ("zapnuto" if vhs_on else "vypnuto"))
 			KEY_B:
 				settings.bodycam = not bool(settings.bodycam)
-				if bodycam: bodycam.set_enabled(bool(settings.bodycam))
+				_set_bodycam(bool(settings.bodycam))
 				_say("Bodycam (experiment): " + ("zapnuto" if settings.bodycam else "vypnuto"))
 			KEY_F:
 				if flashlight:
@@ -1351,6 +1399,7 @@ func _process(dt: float) -> void:
 	if _splash:
 		_splash.global_position = Vector3(eye.x, WATER_Y + 0.02, eye.z)
 	_update_post(dt)
+	_update_mists(dt, eye)
 	# bouřka: občas blesk v dálce, hrom se zpožděním
 	if THUNDER:
 		_thunder_t -= dt

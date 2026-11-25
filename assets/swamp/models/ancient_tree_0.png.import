@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://ceefpk83u5xt6"
-path="res://.godot/imported/ancient_tree_0.png-4534d7964e5a78afca42c807e6e4ec97.ctex"
+path.s3tc="res://.godot/imported/ancient_tree_0.png-4534d7964e5a78afca42c807e6e4ec97.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "cb76d38793e7ffa5d82127e73dca58b4"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/swamp/models/ancient_tree_0.png"
-dest_files=["res://.godot/imported/ancient_tree_0.png-4534d7964e5a78afca42c807e6e4ec97.ctex"]
+dest_files=["res://.godot/imported/ancient_tree_0.png-4534d7964e5a78afca42c807e6e4ec97.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

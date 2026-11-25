@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bk5qr27j7neik"
-path="res://.godot/imported/river_rocks_9.png-e5fd7da0feb750bcc160c5074c94d251.ctex"
+path.s3tc="res://.godot/imported/river_rocks_9.png-e5fd7da0feb750bcc160c5074c94d251.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "14b152dcf7d060dd889d8c3e062550e8"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/swamp/models/river_rocks_9.png"
-dest_files=["res://.godot/imported/river_rocks_9.png-e5fd7da0feb750bcc160c5074c94d251.ctex"]
+dest_files=["res://.godot/imported/river_rocks_9.png-e5fd7da0feb750bcc160c5074c94d251.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0
