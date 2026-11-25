@@ -390,9 +390,10 @@ func _build_environment() -> void:
 	_env.ambient_light_energy = 0.1
 	_env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	_env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	_env.tonemap_exposure = 1.1
+	_env.tonemap_exposure = 1.15
+	_env.tonemap_white = 2.6           # silná světla se nepřepálí do bíla
 	_env.glow_enabled = true
-	_env.glow_intensity = 0.6
+	_env.glow_intensity = 0.35
 	_env.glow_bloom = 0.03
 	_env.glow_hdr_threshold = 0.9
 	_env.ssao_enabled = true
@@ -477,6 +478,9 @@ func _build_rain() -> void:
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
 	m.billboard_keep_scale = true
 	m.albedo_color = Color(0.6, 0.64, 0.7, 0.16)
+	m.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_ALPHA     # kapky těsně před kamerou nesvítí
+	m.distance_fade_min_distance = 0.6
+	m.distance_fade_max_distance = 2.5
 	m.roughness = 0.25
 	m.disable_receive_shadows = true
 	qm.material = m
@@ -1182,22 +1186,22 @@ func _make_flashlight(parent: Node3D) -> void:
 	flashlight.position = Vector3(0.12, -0.12, -0.1)
 	flashlight.light_color = Color(1.0, 0.9, 0.76)
 	# dosvítí jen pár metrů, pak se kužel ztratí v mlze a tmě
-	flashlight.light_energy = 16.0
+	flashlight.light_energy = 12.0
 	flashlight.spot_range = 17.0
 	flashlight.spot_angle = 36.0
 	flashlight.spot_angle_attenuation = 0.5
-	flashlight.spot_attenuation = 1.9
+	flashlight.spot_attenuation = 1.4
 	flashlight.light_projector = _flash_cookie()
 	flashlight.shadow_enabled = true
 	flashlight.shadow_blur = 1.2
 	flashlight.shadow_caster_mask = 0xFFFFF & ~(4 | 8)
-	flashlight.light_volumetric_fog_energy = 0.3
+	flashlight.light_volumetric_fog_energy = 0.05     # jinak mlha těsně u lampy zbělá
 	flashlight.light_specular = 0.8
 	parent.add_child(flashlight)
 	# kapky deště v kuželu: kolem baterky se rozzáří, dál zmizí ve tmě
 	var spill := SpotLight3D.new()
 	spill.light_color = flashlight.light_color
-	spill.light_energy = 0.3
+	spill.light_energy = 0.15
 	spill.spot_range = 7.0
 	spill.spot_angle = 55.0
 	spill.spot_angle_attenuation = 1.5
@@ -1317,10 +1321,9 @@ func _build_post() -> void:
 func _set_bodycam(v: bool) -> void:
 	if bodycam == null: return
 	bodycam.set_enabled(v)
-	if v and cam_attr:
-		cam_attr.auto_exposure_scale = 0.12
-		cam_attr.auto_exposure_min_sensitivity = 50.0
-		cam_attr.auto_exposure_max_sensitivity = 80.0
+	# v bažině bez automatické expozice (ve tmě by obraz zesvětlovala) a s menší září světel
+	if cam_attr: cam_attr.auto_exposure_enabled = false
+	bodycam.mat.set_shader_parameter("bloom", 0.15)
 
 # ------------------------------------------------------------------ cáry mlhy
 
@@ -1395,6 +1398,8 @@ var _vt_step := 0
 func _run_visor_test() -> void:
 	if visor == null: return
 	var out := OS.get_environment("SWAMP_OUT")
+	if _vt_step == 0 and _time < 0.5 and OS.get_environment("SWAMP_TEST_PITCH") != "":
+		player.pitch = deg_to_rad(float(OS.get_environment("SWAMP_TEST_PITCH")))
 	if _time < 5.0:
 		visor._wet = minf(1.0, visor._wet + 0.02)
 	var marks := [5.0, 5.35, 5.7, 7.5]
