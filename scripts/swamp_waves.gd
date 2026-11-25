@@ -20,6 +20,7 @@ var _pause := 8.0
 var _regen := 0.0
 var _dead := false
 var _fx: Node3D
+var alpha: Node3D
 var _nav_ready := false
 var _nav_region: RID
 var _hud: Label
@@ -47,6 +48,10 @@ func setup(m: Node3D) -> void:
 	player.weapon.melee_hit.connect(_melee)
 	_build_hud()
 	_bake_navigation.call_deferred()
+	# bažinák (alfa): hýbe se, jen když se nedíváš
+	alpha = preload("res://scripts/swamp_alpha.gd").new()
+	m.add_child(alpha)
+	alpha.setup(m, self)
 
 static func reset_statics() -> void:
 	ZombieScript.fx = null
@@ -170,6 +175,7 @@ func _process(dt: float) -> void:
 			var d := 999.0
 			for z in ZombieScript.crowd:
 				if is_instance_valid(z) and not z.dead: d = minf(d, z.global_position.distance_to(player.global_position))
+			if alpha: print("bažinák ", alpha.state, " hp ", int(alpha.hp), " vzdálenost ", snappedf(alpha.global_position.distance_to(player.global_position), 0.1))
 			print("kolo ", round_now, " naživu ", _alive(), " zbývá ", _to_spawn, " zdraví ", int(health), " nejbližší ", snappedf(d, 0.1))
 	_regen -= dt
 	if _regen <= 0.0: health = minf(100.0, health + dt * 18.0)
@@ -224,6 +230,7 @@ func _restart() -> void:
 		if is_instance_valid(c): c.queue_free()
 	ZombieScript.crowd.clear()
 	ZombieScript.corpses.clear()
+	if alpha: alpha.reset()
 	health = 100.0
 	round_now = 0
 	kills = 0
@@ -258,6 +265,9 @@ func _fired(origin: Vector3, hit: Vector3) -> void:
 			end = far
 			break
 		end = target.position
+		if target.collider.has_meta("alpha"):
+			target.collider.get_meta("alpha").shot(target.position, direction, float(player.weapon.damage) * maxf(power, 0.4))
+			break
 		if not target.collider.has_meta("zombie"):
 			solid = true
 			normal = target.normal

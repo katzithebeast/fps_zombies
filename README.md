@@ -289,6 +289,10 @@ Od místa výsadku vede k polozatopenému sovětskému bunkru rozpadlá lávka a
 Bouřka (blesk a hrom v dálce) se vypíná konstantou `THUNDER` nahoře v `swamp.gd`.
 Test boje (`scripts/swamp_waves.gd`): AK-47, MP 40, IŽ-54 a Desert Eagle (1–4 nebo kolečko, nekonečná zásoba),
 vlny zombie z hlavní hry (kola, víc a rychlejší), zdraví hráče, po smrti znovu od 1. kola. `SWAMP_DEBUG=1` vypisuje stav kol.
+Bažinák (`scripts/swamp_alpha.gd`, test alfy): po ~1 minutě se vynoří ve tmě za hráčem a hýbe se, jen když se na něj
+nedíváš. Zamrzne, když je v záběru a nezakrytý a zároveň na něj svítí baterka, blýskne se nebo je blíž než 4,5 m.
+Plíží se po navigaci a čvachtá. U hráče udeří (45), ponoří se a vynoří se jinde. Má 2400 HP a po každé ztracené třetině uteče pod hladinu;
+zabitý padne do bahna. `SWAMP_ALPHA_T=3` = vynoří se hned (test).
 V bažině je od začátku zapnutá bodycam (B), VHS kamera (V) a hledí helmy: déšť na něj postupně napadá
 (za ~40 s je celé pokapané) a otírá se klávesou H (ruka přejede po skle, pak začne pršet na čisté). Stromy, keře a kameny mají shader mokré vegetace
 (`shaders/swamp_foliage.gdshader`: přebarvení, lesk a kapky deště, prosvítání listů, vítr). Autoři modelů: `assets/swamp/CREDITS.md`.
