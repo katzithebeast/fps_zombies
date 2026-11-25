@@ -143,32 +143,17 @@ func _ready() -> void:
 	_make_materials()
 	Player.water_at = water_level_at
 	ZombieScript.water_at = water_level_at
-	world_body = StaticBody3D.new()
-	world_body.collision_layer = 1
-	add_child(world_body)
-	_build_level()
-	_build_east_wing()
-	_build_cistern()
-	_build_toilets()
-	_build_west_showers()
-	_build_north_wing()
-	_build_south_wing()
-	# Detaily bazénů: dělicí lana, startovní bloky, žebříky, záchranné kruhy, hloubky, mřížky.
-	load("res://scripts/architecture.gd").build(self)
+	# Mapa je normální scéna maps/main_map.tscn (upravuje se v editoru). Kód níže ji umí znovu
+	# vygenerovat (tools/bake_main.gd) – tím by se ale ruční úpravy přepsaly.
+	if not bake_mode and ResourceLoader.exists(MAIN_MAP):
+		_load_map()
+	else:
+		_generate_level()
+		if bake_mode:
+			set_process(false)
+			set_physics_process(false)
+			return
 	_scatter_blood.call_deferred()
-	# Vázy s kytkami: kousek života v opuštěných prostorách.
-	for v in [[Vector3(36.6, 1.45, 16.6), 1.3], [Vector3(24.6, 1.45, 16.4), 1.3], [Vector3(3.0, 0.5, 1.9), 1.0], [Vector3(60.8, -0.35, 39.2), 1.4], [Vector3(14.5, -0.35, -35.0), 1.3]]:
-		var vase := Props.vase()
-		add_child(vase)
-		vase.position = v[0]
-		vase.scale = Vector3.ONE * v[1]
-		vase.rotation.y = randf() * TAU
-		_vases.append(vase)
-	# Podlaha v tloušťce zdí u průchodů mezi novými částmi (jinak tam zela černá škvíra).
-	for gap in [[12.6, 13.8, -42.0, -40.0], [-13.2, -12.6, -38.8, -36.8],
-			[-4.0, -2.0, -46.6, -46.0], [24.0, 26.0, -34.6, -34.0], [-21.2, -19.2, -22.8, -22.2], [32.0, 35.0, -2.0, -1.4],
-			[-13.2, -12.6, -52.8, -50.8], [-10.6, -10.0, -52.8, -50.8]]:
-		_gap_floor(gap[0], gap[1], gap[2], gap[3])
 	_merge_world()
 	_settle_vases.call_deferred()
 	_build_water()
@@ -784,21 +769,108 @@ func _update_shadow_budget(dt: float) -> void:
 			l.shadow_enabled = on
 
 # =============================================================== stavebnice
+## Původní stavba mapy kódem (pro tools/bake_main.gd, nebo když scéna mapy chybí).
+func _generate_level() -> void:
+	world_body = StaticBody3D.new()
+	world_body.name = "Kolize_ostatni"
+	world_body.collision_layer = 1
+	add_child(world_body)
+	var parts := [["Hlavni_lazne", _build_level], ["Vychodni_kridlo", _build_east_wing], ["Cisterna", _build_cistern],
+		["Zachody", _build_toilets], ["Zapadni_sprchy", _build_west_showers], ["Severni_kridlo", _build_north_wing],
+		["Jizni_kridlo", _build_south_wing], ["Detaily_bazenu", func(): load("res://scripts/architecture.gd").build(self)]]
+	for part in parts:
+		(part[1] as Callable).call()
+		bake_marks.append([part[0], get_child_count()])
+	# Vázy s kytkami: kousek života v opuštěných prostorách.
+	for v in [[Vector3(36.6, 1.45, 16.6), 1.3], [Vector3(24.6, 1.45, 16.4), 1.3], [Vector3(3.0, 0.5, 1.9), 1.0], [Vector3(60.8, -0.35, 39.2), 1.4], [Vector3(14.5, -0.35, -35.0), 1.3]]:
+		var vase := Props.vase()
+		add_child(vase)
+		vase.position = v[0]
+		vase.scale = Vector3.ONE * v[1]
+		vase.rotation.y = randf() * TAU
+		vase.add_to_group("vaza", true)
+		_vases.append(vase)
+	# Podlaha v tloušťce zdí u průchodů mezi novými částmi (jinak tam zela černá škvíra).
+	for gap in [[12.6, 13.8, -42.0, -40.0], [-13.2, -12.6, -38.8, -36.8],
+			[-4.0, -2.0, -46.6, -46.0], [24.0, 26.0, -34.6, -34.0], [-21.2, -19.2, -22.8, -22.2], [32.0, 35.0, -2.0, -1.4],
+			[-13.2, -12.6, -52.8, -50.8], [-10.6, -10.0, -52.8, -50.8]]:
+		_gap_floor(gap[0], gap[1], gap[2], gap[3])
+	bake_marks.append(["Vazy_a_pruchody", get_child_count()])
+
+## Načte mapu ze scény: uzly, kolize, data (voda, světlíky, podlahy) a lampy.
+func _load_map() -> void:
+	var map: Node3D = load(MAIN_MAP).instantiate()
+	add_child(map)
+	# náhledy jen pro editor (hladiny vody) pryč
+	for n in map.find_children("*", "", true, false):
+		if n.get_meta("editor_only", false) and is_instance_valid(n) and n.get_parent():
+			n.get_parent().remove_child(n)
+			n.queue_free()
+	world_body = map.find_child("Kolize_ostatni", true, false)
+	if world_body == null:
+		world_body = StaticBody3D.new()
+		map.add_child(world_body)
+	# kolize, které v editoru visí na svých zdech, se pro běh slijí do jednoho tělesa (rychlejší fyzika,
+	# a zdi se pak dají slít do pár meshů)
+	for b in map.find_children("Kolize*", "StaticBody3D", true, false):
+		if b == world_body or not b.get_meta("wall_collider", false):
+			continue
+		for cs in b.get_children():
+			if cs is CollisionShape3D:
+				var t: Transform3D = (cs as Node3D).global_transform
+				cs.reparent(world_body, false)
+				(cs as Node3D).global_transform = t
+		b.get_parent().remove_child(b)
+		b.queue_free()
+	# společné materiály zpět na živé instance (shader dlaždic dostává parametry za běhu)
+	var live := {"tile_mat": tile_mat, "water_mat": water_mat, "chrome_mat": chrome_mat, "dark_mat": dark_mat, "void_mat": void_mat}
+	for g in map.find_children("*", "GeometryInstance3D", true, false):
+		var gi: GeometryInstance3D = g
+		var mo: Material = gi.material_override
+		if mo and mo.has_meta("main_mat") and live.has(mo.get_meta("main_mat")):
+			gi.material_override = live[mo.get_meta("main_mat")]
+	# data mapy
+	var data: Node = map.find_child("DataMapy", true, false)
+	if data:
+		solids.assign(data.solids)
+		water_rects.assign(data.water_rects)
+		water_groups = data.water_groups
+		water_zones = data.water_zones.duplicate(true)
+		skylights.assign(data.skylights)
+		_floor_tiles = data.floor_tiles.duplicate(true)
+	# lampy (blikání, bzučení, úkoly)
+	for l in map.find_children("*", "OmniLight3D", true, false):
+		if l.has_meta("lamp"):
+			var info: Dictionary = l.get_meta("lamp")
+			lamps.append({"light": l, "mat": l.get_meta("lamp_mat"), "energy": float(info.energy), "flicker": bool(info.flicker), "on": 1.0, "timer": 2.0, "seq": 0})
+	for v in get_tree().get_nodes_in_group("vaza"):
+		_vases.append(v)
+	_settle_vases.call_deferred()
+
+## Zdi, podlahy a lišty k slití: přímí potomci (stavba kódem) i obsah složek mapy ze scény.
+func _merge_candidates() -> Array:
+	var out := []
+	for c in get_children():
+		if c is MeshInstance3D: out.append(c)
+		elif c.scene_file_path == MAIN_MAP:
+			for f in c.get_children():
+				for m in f.get_children():
+					if m is MeshInstance3D: out.append(m)
+	return out
+
 func _merge_world() -> void:
 	# Stovky samostatných kvádrů zdí, podlah a lišt se slijí do pár desítek meshů:
 	# stejný materiál + odstín + měřítko dlaždic, rozdělené do buněk 12 m, aby fungovalo ořezávání
 	# mimo záběr a za zdmi. Dlaždice se mapují ve světových souřadnicích, takže vzhled zůstane stejný.
 	const CELL := 12.0
 	var groups := {}
-	for c in get_children():
-		if not (c is MeshInstance3D):
-			continue
+	for c in _merge_candidates():
 		var mi: MeshInstance3D = c
 		if not (mi.mesh is PrimitiveMesh) or mi.get_child_count() > 0 or mi.material_override == null or not mi.visible:
 			continue
 		if mi.get_meta_list().size() > 0 or mi.layers != 1:
 			continue
-		var cell := (mi.position / CELL).floor()
+		var cell := (mi.global_position / CELL).floor()
 		var key := [mi.material_override, mi.get_instance_shader_parameter("tint"), mi.get_instance_shader_parameter("tile_scale"),
 			mi.cast_shadow, mi.visibility_range_end, cell]
 		var id := str(key)
@@ -815,7 +887,7 @@ func _merge_world() -> void:
 			continue
 		var st := SurfaceTool.new()
 		for mi in items:
-			st.append_from((mi as MeshInstance3D).mesh, 0, (mi as MeshInstance3D).transform)
+			st.append_from((mi as MeshInstance3D).mesh, 0, global_transform.affine_inverse() * (mi as MeshInstance3D).global_transform)
 		var merged := MeshInstance3D.new()
 		merged.mesh = st.commit()
 		var key: Array = groups[id].key
@@ -826,7 +898,7 @@ func _merge_world() -> void:
 		if key[1] != null: merged.set_instance_shader_parameter("tint", key[1])
 		if key[2] != null: merged.set_instance_shader_parameter("tile_scale", key[2])
 		for mi in items:
-			remove_child(mi)
+			(mi as Node).get_parent().remove_child(mi)
 			(mi as Node).queue_free()
 	print("merge_world: %d -> %d meshů" % [before, after])
 
@@ -1785,6 +1857,9 @@ func _stair_ramp(x0: float, x1: float, za: float, ya: float, zb: float, yb: floa
 	add_child(rail)
 
 var _vases: Array = []
+const MAIN_MAP := "res://maps/main_map.tscn"
+static var bake_mode := false
+var bake_marks: Array = []      # [jméno části, počet potomků po ní] – pro složky ve scéně mapy
 
 func _settle_vases() -> void:
 	# Vázy postavit na to, co pod nimi skutečně je (pult, podlaha) – nic nesmí levitovat.

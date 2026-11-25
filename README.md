@@ -271,3 +271,12 @@ Chytré uzly (scripts/lobby/): `Dvere` (stav closed/open/ajar/locked, popisek), 
 Nový nábytek: přetáhni `.glb` z `assets/` do scény. `tools/bake_lobby.gd` mapu vygeneruje znovu kódem –
 **přepíše tím ruční úpravy**, používej jen pro start od nuly.
 Autoři modelů (CC BY 4.0): `assets/lobby/CREDITS.md`. Náhledy: `--script res://tools/t_lobby_shots.gd`.
+
+## Úpravy hlavní mapy v editoru
+Lázně jsou normální scéna `maps/main_map.tscn`. Složky odpovídají částem (Hlavni_lazne, Vychodni_kridlo, Cisterna,
+Zachody, Zapadni_sprchy, Severni_kridlo, Jizni_kridlo, Detaily_bazenu…). Každá zeď nese svou kolizi (uzel `Kolize`),
+takže se posouvají spolu; ve hře se kolize i zdi pro výkon slijí. Lampy (`Svetlo_lampa`) blikají podle metadat.
+Voda, světlíky a barvy podlah jsou data v uzlu `DataMapy` (inspektor) – když posuneš bazén, uprav i jeho obdélník.
+Modré plochy ve složce `Voda_nahled` jsou jen náhled hladin pro editor. Za běhu kód přidává: měsíc, pár lamp,
+podvodní světla, vodu, krev a nepořádek (náhodně), vzkazy, rozhlas, úkoly a zombíky.
+`tools/bake_main.gd` mapu vygeneruje znovu kódem – **přepíše tím ruční úpravy**.
