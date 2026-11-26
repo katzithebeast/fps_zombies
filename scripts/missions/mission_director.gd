@@ -144,6 +144,27 @@ func release() -> Node3D:
 	player.weapon.switch_to(player.weapon.current)
 	return n
 
+## Animace sebrání: předmět přiletí před obličej, chvíli ho hráč drží a pak ho schová (nebo vrátí zpátky).
+## face = natočení předmětu před kamerou (Eulerovy úhly, rad).
+func show_item(node: Node3D, hold := 2.0, done := Callable(), put_back := false, face := Vector3(0.15, 0, 0)) -> void:
+	var start := node.global_transform
+	var was_armed: bool = player.weapon.equipped
+	player.weapon.holster()
+	node.reparent(player.camera, true)
+	var near := Transform3D(Basis.from_euler(face), Vector3(0.0, -0.07, -0.36))
+	var tw := create_tween()
+	tw.tween_property(node, "transform", near, 0.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(hold)
+	if put_back:
+		tw.tween_callback(func(): node.reparent(main, true))
+		tw.tween_property(node, "global_transform", start, 0.5).set_trans(Tween.TRANS_SINE)
+	else:
+		tw.tween_property(node, "position", Vector3(0.18, -0.75, -0.2), 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		tw.tween_callback(node.queue_free)
+	tw.tween_callback(func():
+		if was_armed and carrying == null: player.weapon.switch_to(player.weapon.current)
+		if done.is_valid(): done.call())
+
 ## Rádiová hláška (titulky + šum).
 func radio(text: String, dur := 6.0) -> void:
 	_subs.append([text, dur, true])
@@ -372,6 +393,7 @@ func _update_tracker(dt: float) -> void:
 func _call_heli() -> void:
 	state = "wait_heli"
 	_radio_act.on = false
+	if main.get("radio_node"): show_item(main.radio_node, 4.0, Callable(), true, Vector3(0.1, -0.35, 0.12))
 	_heli_t = float(OS.get_environment("HLADINA_HELI_T")) if OS.get_environment("HLADINA_HELI_T") != "" else HELI_WAIT
 	snd("res://audio/radio/radio_click.wav", -2.0)
 	radio("Centrála: Rozumím, vrtulník je na cestě, odhad %d sekund. Držte se u výsadku." % int(_heli_t), 7.0)

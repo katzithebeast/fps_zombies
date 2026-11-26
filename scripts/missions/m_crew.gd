@@ -23,30 +23,53 @@ func _init() -> void:
 func place() -> void:
 	var th: Dictionary = main.mission_theme()
 	var pts: Array = main.mission_points(4, {"where": "land", "min_spawn": 24.0, "sep": 24.0, "clear": 1.5})
-	var poses := [Vector3(-PI * 0.5, 0, 0), Vector3(PI * 0.5, 0, 0), Vector3(0, 0, PI * 0.5)]
 	for i in pts.size():
 		var p: Vector3 = pts[i]
 		var yaw: float = main.rng.randf() * TAU
 		var kind := i % 3
-		var body: Node3D = director.place_model(main, th.corpses[kind], 1.78, p + Vector3(0, -0.07, 0), yaw, poses[kind])
+		var body := Node3D.new()
+		body.set_script(load("res://scripts/swamp_corpse.gd"))
+		main.add_child(body)
+		body.global_position = p + Vector3(0, 0.45, 0)
+		body.rotation.y = yaw
+		body.setup(kind, main.rng)
 		# diktafon vedle ruky, baterka o kus dál (svítí do strany)
 		var side := Vector3(cos(yaw), 0, -sin(yaw))
 		var dp: Vector3 = p + side * 0.75 + Vector3(0, 0, 0)
 		dp.y = main.ground(dp.x, dp.z) - 0.005
-		var dic: Node3D = director.place_model(main, th.dictaphone, 0.11, dp, main.rng.randf() * TAU, Vector3(-PI * 0.5, 0, 0))
+		var dic: Node3D = director.place_model(main, th.dictaphone, 0.15, dp, main.rng.randf() * TAU, Vector3(-PI * 0.5, 0, 0))
+		# červená dioda nahrávání: ve tmě je diktafon vidět
+		var led: MeshInstance3D = director.box(dic, Vector3(0.012, 0.006, 0.012), Vector3(0.0, 0.03, -0.04), Color(1.0, 0.05, 0.03), 8.0)
+		var ll := OmniLight3D.new()
+		ll.light_color = Color(1.0, 0.1, 0.05)
+		ll.light_energy = 0.6
+		ll.omni_range = 1.6
+		ll.position = Vector3(0, 0.06, -0.04)
+		dic.add_child(ll)
 		var lp: Vector3 = p - side * 0.9
 		lp.y = maxf(main.ground(lp.x, lp.z), main.WATER_Y)
 		director.dropped_light(lp, main.rng.randf() * TAU)
-		var b := {"pos": p, "body": body, "dic": dic, "done": false}
+		var b := {"pos": p, "body": body, "dic": dic, "led": led, "light": ll, "done": false}
 		b.act = director.add_action(dp, "Vzít diktafon", 1.4, _take.bind(b))
 		bodies.append(b)
 
 func _take(b: Dictionary) -> void:
 	b.done = true
-	if is_instance_valid(b.dic): b.dic.queue_free()
 	got += 1
-	director.play_log(LOGS[got - 1])
-	if got == bodies.size(): complete()
+	var n := got
+	# diktafon k obličeji, cvak a přehrání záznamu; pak do kapsy
+	director.show_item(b.dic, 2.6, func(): if n == bodies.size(): complete(), false, Vector3(PI * 0.5 + 0.25, 0, 0))
+	director.snd("res://audio/radio/radio_click.wav", -4.0, 1.3)
+	director.play_log(LOGS[n - 1])
+
+var _t := 0.0
+func tick(dt: float) -> void:
+	_t += dt
+	for b in bodies:
+		if b.done or not is_instance_valid(b.led): continue
+		var on := fmod(_t + b.pos.x, 1.6) < 0.8
+		b.led.visible = on
+		b.light.light_energy = 0.6 if on else 0.0
 
 func lines() -> Array:
 	return ["Záznamy z diktafonů: %d/%d" % [got, bodies.size()]]

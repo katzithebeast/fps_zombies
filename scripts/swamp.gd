@@ -73,6 +73,7 @@ var waves: Node
 var missions: Node                    # režisér misí (scripts/missions/mission_director.gd)
 var map_name := "Bažina"
 var radio_pos := Vector3.ZERO          # vysílačka u výsadku (volání vrtulníku)
+var radio_node: Node3D                 # vysílačka (při volání ji hráč zvedne k obličeji)
 var cargo_drop := Vector3.ZERO         # kam se skládají přinesené bedny
 var _reserved: Array = []              # místa už zabraná misemi
 const Director := preload("res://scripts/missions/mission_director.gd")
@@ -1877,7 +1878,7 @@ func _build_camp() -> void:
 	var cp: Vector3 = at.call(spawn + side * 2.3 - g * 1.2)
 	var crate := Director.box(root, Vector3(0.75, 0.5, 0.5), cp + Vector3(0, 0.22, 0), Color(0.16, 0.2, 0.12))
 	crate.rotation.y = yaw_g
-	Director.place_model(root, MD + "army_transmitter.glb", 0.55, cp + Vector3(0, 0.47, 0), yaw_g + 0.4)
+	radio_node = Director.place_model(root, MD + "army_transmitter.glb", 0.55, cp + Vector3(0, 0.47, 0), yaw_g + 0.4)
 	radio_pos = cp + Vector3(0, 0.6, 0)
 	var lamp := OmniLight3D.new()
 	lamp.light_color = Color(1.0, 0.72, 0.42)

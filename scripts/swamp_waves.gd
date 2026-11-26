@@ -299,6 +299,10 @@ func _fired(origin: Vector3, hit: Vector3) -> void:
 			end = far
 			break
 		end = target.position
+		if target.collider.has_meta("corpse"):
+			target.collider.get_meta("corpse").shot(target.collider, target.position, direction, maxf(power, 0.4))
+			_fx.blood(target.position, direction, false)
+			break
 		if target.collider.has_meta("alpha"):
 			target.collider.get_meta("alpha").shot(target.position, direction, float(player.weapon.damage) * maxf(power, 0.4))
 			break
