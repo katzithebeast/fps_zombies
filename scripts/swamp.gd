@@ -75,6 +75,15 @@ var missions: Node                    # režisér misí (scripts/missions/missio
 var map_name := "Bažina"
 var radio_pos := Vector3.ZERO          # vysílačka u výsadku (volání vrtulníku)
 var radio_node: Node3D                 # vysílačka (při volání ji hráč zvedne k obličeji)
+var pond := Vector2.ZERO               # hlubší tůň u výsadku, kde kotví člun
+var pond_dir := Vector3.ZERO           # směr od výsadku k tůni
+const POND_R := 7.0
+var boat: Node3D                       # člun: příjezd na začátku a odjezd na konci mise
+var boat_dock := Transform3D()         # kde člun kotví (příď ke břehu)
+var boat_out := Transform3D()          # odkud připlouvá / kam odplouvá (druhý konec tůně)
+var boat_seat := Vector3(0.0, 0.42, -1.15)   # nohy hráče v člunu (lokálně, záď je -Z)
+var boat_shore := Vector3.ZERO         # kde hráč vystoupí
+var boat_act := Vector3.ZERO           # kde se drží E (u přídě)
 var cargo_drop := Vector3.ZERO         # kam se skládají přinesené bedny
 var _reserved: Array = []              # místa už zabraná misemi
 const Director := preload("res://scripts/missions/mission_director.gd")
@@ -147,6 +156,13 @@ func _layout() -> void:
 	var g := Vector2.from_angle(a + PI + rng.randf_range(-0.6, 0.6)) * 54.0
 	spawn = Vector3(clampf(s.x, -R + 18, R - 18), 0.0, clampf(s.y, -R + 18, R - 18))
 	goal = Vector3(clampf(g.x, -R + 18, R - 18), 0.0, clampf(g.y, -R + 18, R - 18))
+	# tůň pro člun: kolmo na směr k bunkru, na tu stranu, která je blíž středu mapy
+	var gd := Vector3(goal.x - spawn.x, 0, goal.z - spawn.z).normalized()
+	var sd := Vector3(-gd.z, 0, gd.x)
+	var c1 := spawn + sd * 13.0
+	var c2 := spawn - sd * 13.0
+	pond_dir = sd if maxf(absf(c1.x), absf(c1.z)) < maxf(absf(c2.x), absf(c2.z)) else -sd
+	pond = Vector2(spawn.x + pond_dir.x * 13.0, spawn.z + pond_dir.z * 13.0)
 	# klikatá lávka mezi nimi (na koncích přímo do mýtin)
 	var pa := Vector2(spawn.x, spawn.z)
 	var pb := Vector2(goal.x, goal.z)
@@ -181,6 +197,10 @@ func height(x: float, z: float) -> float:
 	for c in [spawn, goal]:
 		var k := 1.0 - smoothstep(4.5, 9.0, Vector2(x - c.x, z - c.z).length())
 		h = lerpf(h, 0.35 + d * 0.1, k)
+	# hluboká tůň pro člun
+	var dp := Vector2(x - pond.x, z - pond.y).length() + d * 1.2
+	var kp := 1.0 - smoothstep(POND_R * 0.45, POND_R, dp)
+	if kp > 0.0: h = lerpf(h, -1.8 + d * 0.1, kp)
 	return h
 
 ## Výška terénu (stejná interpolace jako mesh).
@@ -291,6 +311,7 @@ func _near_path(x: float, z: float) -> bool:
 	return _path_mask[gz * _n + gx] == 1
 
 func _in_clearing(x: float, z: float, r := 9.0) -> bool:
+	if Vector2(x - pond.x, z - pond.y).length() < POND_R + 1.5: return true
 	return Vector2(x - spawn.x, z - spawn.z).length() < r or Vector2(x - goal.x, z - goal.z).length() < r
 
 func _noise_tex(size: int, freq: float, s: int) -> NoiseTexture2D:
@@ -886,6 +907,21 @@ func _build_fences() -> void:
 	root.name = "Ploty"
 	add_child(root)
 	var panels := ["02", "02_2", "02_3", "02_4"]
+	if Director.fence_full:
+		# celý plot dokola (přepínač v testovacím panelu F3)
+		var a := R - WALL - 0.35
+		var w := 1.56
+		for side in 4:
+			var t := -a + w * 0.5
+			while t < a:
+				var p := Vector2(t, a) if side == 0 else (Vector2(t, -a) if side == 1 else (Vector2(a, t) if side == 2 else Vector2(-a, t)))
+				var yaw := 0.0 if side < 2 else PI * 0.5
+				var gy := ground(p.x, p.y)
+				var lean := rng.randf_range(-0.05, 0.05) + (rng.randf_range(-0.18, 0.18) if rng.randf() < 0.12 else 0.0)
+				var pv := Director.place_model(root, MD + "fence.glb", 2.2, Vector3(p.x, gy - 0.18, p.y), yaw + rng.randf_range(-0.04, 0.04), Vector3(lean, 0, rng.randf_range(-0.03, 0.03)), panels.pick_random())
+				Director.collider(root, Vector3(w, 2.2, 0.2), Transform3D(Basis(Vector3.UP, pv.rotation.y), Vector3(p.x, gy + 0.9, p.y)))
+				t += w
+		return
 	var runs := rng.randi_range(9, 13)
 	var used := []
 	for r in runs:
@@ -1893,6 +1929,7 @@ func mission_theme() -> Dictionary:
 	}
 
 func extraction_point() -> Vector3:
+	if boat: return boat_act                  # odjíždí se člunem
 	return Vector3(spawn.x, _spawn_y(), spawn.z)
 
 ## Body pro mise. opts: where (land | water | any), min_spawn, max_spawn, sep (rozestup), clear (volno od stromů).
@@ -1958,7 +1995,7 @@ func _build_camp() -> void:
 	root.name = "Tabor"
 	add_child(root)
 	var g := Vector3(goal.x - spawn.x, 0, goal.z - spawn.z).normalized()
-	var side := Vector3(-g.z, 0, g.x)
+	var side := -pond_dir                # stan a vysílačka na opačné straně než tůň s člunem
 	var yaw_g := atan2(g.x, g.z)
 	var at := func(v: Vector3) -> Vector3: return Vector3(v.x, ground(v.x, v.z), v.z)
 	# UAZ zapadlý v bahně na okraji ostrůvku
@@ -1990,6 +2027,44 @@ func _build_camp() -> void:
 		Director.place_model(root, MD + "jerrycan.glb", 0.47, jp, yaw_g + rng.randf_range(-0.3, 0.3))
 	cargo_drop = at.call(spawn - g * 3.6 - side * 1.4)
 	_reserved.append(spawn)
+	_reserved.append(Vector3(pond.x, 0, pond.y))
+	_build_boat()
+
+## Člun v tůni: kotví přídí ke břehu. Do hluboké části tůně se nedá vejít (kolize), takže tam nechodí ani zombie.
+func _build_boat() -> void:
+	var c := Vector3(pond.x, 0, pond.y)
+	var to_shore := -pond_dir
+	var yaw := atan2(to_shore.x, to_shore.z)          # příď (+Z modelu) ke břehu
+	var dock := c + to_shore * 2.6
+	boat_dock = Transform3D(Basis(Vector3.UP, yaw), Vector3(dock.x, WATER_Y - 0.32, dock.z))
+	var out := c - to_shore * 3.2
+	boat_out = Transform3D(Basis(Vector3.UP, yaw + 0.5), Vector3(out.x, WATER_Y - 0.32, out.z))
+	boat = Director.place_model(self, MD + "assault_boat.glb", 4.8, boat_dock.origin, yaw)
+	boat.name = "Clun"
+	# lucerna na zádi (ve tmě je černý člun jinak k nenalezení)
+	var lamp := OmniLight3D.new()
+	lamp.light_color = Color(1.0, 0.78, 0.5)
+	lamp.light_energy = 0.9
+	lamp.omni_range = 5.0
+	lamp.shadow_enabled = true
+	lamp.light_volumetric_fog_energy = 1.0
+	lamp.position = Vector3(0.55, 0.95, -1.7)
+	boat.add_child(lamp)
+	Director.box(boat, Vector3(0.1, 0.16, 0.1), Vector3(0.55, 0.78, -1.7), Color(1.0, 0.8, 0.5), 2.5)
+	boat_act = dock + to_shore * 2.6
+	boat_act.y = maxf(ground(boat_act.x, boat_act.z), WATER_Y)
+	var sh := c + to_shore * (POND_R + 0.8)
+	boat_shore = Vector3(sh.x, ground(sh.x, sh.z) + 0.05, sh.z)
+	# neprostupná hluboká voda (válec)
+	var sb := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var cyl := CylinderShape3D.new()
+	cyl.radius = POND_R * 0.62
+	cyl.height = 4.0
+	cs.shape = cyl
+	sb.add_child(cs)
+	add_child(sb)
+	sb.global_position = c + Vector3(0, WATER_Y + 0.3, 0)
 
 # =================================================================== náhledy
 
@@ -2042,6 +2117,13 @@ func _run_shots() -> void:
 			pos.y = maxf(ground(pos.x, pos.z), WATER_Y) + 1.65
 			yaw = atan2(off.x, off.z)
 			pitch = atan2(tp.y + 0.3 - pos.y, off.length())
+		elif s == "boat" and boat:
+			# z břehu na člun v tůni
+			var to := boat_dock.origin - boat_shore
+			to.y = 0.0
+			pos = boat_shore - to.normalized() * 2.0 + Vector3(0, 1.65, 0)
+			yaw = atan2(-to.x, -to.z)
+			pitch = -0.22
 		elif s == "camp":
 			var g := Vector3(goal.x - spawn.x, 0, goal.z - spawn.z).normalized()
 			pos = Vector3(spawn.x, _spawn_y() + 1.65, spawn.z) + g * 3.0

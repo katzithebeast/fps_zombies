@@ -25,8 +25,12 @@ const HELI_WAIT := 45.0
 const MISSION_NAMES := {"crew": "Najdi předchozí četu", "clear": "Vyčisti oblast", "cargo": "Vyzvedni náklad", "probes": "Měřicí sondy", "alpha": "Hon na alfu"}
 # testovací panel (F3): přežijí znovunačtení scény
 static var next_mission := ""
+static var fence_full := true          # plot kolem celé mapy (F3 přepínač, platí od další generace)
 static var next_seed := -1
 const BOARD_R := 7.0
+const BOAT_WAIT := 30.0          # motor se zahřívá, tým brání člun
+const ARRIVE_T := 7.0
+const DEPART_T := 6.0
 
 var main: Node3D
 var player: CharacterBody3D
@@ -42,6 +46,12 @@ var _acts: Array = []
 var _focus: Dictionary = {}
 var _hold := 0.0
 var _radio_act: Dictionary
+var boat_mode := false           # mapa má člun: příjezd a odjezd po vodě místo vrtulníku
+var _boat_act: Dictionary
+var _cut := ""                   # arrive | depart (scéna v člunu)
+var _boat_t := 0.0
+var _motor: AudioStreamPlayer3D
+var _wake_t := 0.0
 var _carry_drop: Callable
 var _heli_t := 0.0
 var _heli: Node3D
@@ -100,9 +110,25 @@ func setup(m: Node3D) -> void:
 	if OS.get_environment("SWAMP_NOZOMBIES") == "1": waves.mode = "off"      # snímky v kontejneru
 	if waves.alpha:
 		waves.alpha.enabled = mission.wants_alpha or m.rng.randf() < 0.15
-	_radio_act = add_action(m.radio_pos, "Zavolat vrtulník", 2.0, _call_heli, false)
+	boat_mode = m.get("boat") != null
+	if boat_mode:
+		_radio_act = {}
+		_boat_act = add_action(m.boat_act, "Nastartovat motor", 2.5, _start_motor, false, 2.8)
+	else:
+		_radio_act = add_action(m.radio_pos, "Zavolat vrtulník", 2.0, _call_heli, false)
 	_build_ui()
 	_build_sounds()
+	if boat_mode:
+		_motor = AudioStreamPlayer3D.new()
+		_motor.stream = _rotor_stream(23.0, 96.0)
+		_motor.unit_size = 9.0
+		_motor.volume_db = -2.0
+		m.boat.add_child(_motor)
+		_motor.position = Vector3(0, 0.8, -2.2)
+		if OS.get_environment("HLADINA_NO_INTRO") != "1" and not _autotest and not _dbg_test:
+			start_arrival()
+		else:
+			player.teleport(m.boat_shore, _yaw_to(m.boat_shore, m.goal), -0.05)
 	print("Mise: ", mission_id, " (", mission.title, ")")
 
 # ------------------------------------------------------------------ API pro mise
@@ -195,8 +221,12 @@ func flicker(l: Light3D) -> void:
 
 func mission_complete() -> void:
 	state = "extract"
-	_radio_act.on = true
 	main.sfx.play("round_end", -4.0)
+	if boat_mode:
+		_boat_act.on = true
+		radio("Centrála: Výborně, máme to. Vraťte se k člunu a nastartujte motor.", 7.0)
+		return
+	_radio_act.on = true
 	radio("Centrála: Výborně, máme to. Vraťte se k vysílačce u výsadku a zavolejte vrtulník.", 7.0)
 
 func player_died() -> void:
@@ -305,6 +335,8 @@ func _process(dt: float) -> void:
 		return
 	_update_subs(dt)
 	_update_flicker(dt)
+	if _cut != "": _update_cut(dt)
+	elif boat_mode: _bob()
 	if state == "done" or state == "failed":
 		_end_t += dt
 		_end.modulate.a = clampf(_end_t / 1.5, 0.0, 1.0)
@@ -313,7 +345,7 @@ func _process(dt: float) -> void:
 			_snaps.clear()
 		return
 	if state == "wait_nav":
-		if waves._nav_ready:
+		if waves._nav_ready and _cut == "":
 			state = "active"
 			mission.start()
 			radio_sequence()
@@ -333,9 +365,13 @@ func _process(dt: float) -> void:
 	match state:
 		"wait_heli":
 			_heli_t -= dt
-			_update_heli(dt)
-			if _heli_t <= 0.0: _heli_arrive()
+			if boat_mode:
+				if _heli_t <= 0.0: _motor_ready()
+			else:
+				_update_heli(dt)
+				if _heli_t <= 0.0: _heli_arrive()
 		"board":
+			if boat_mode: return
 			_update_heli(dt)
 			var e: Vector3 = main.extraction_point()
 			if Vector2(player.global_position.x - e.x, player.global_position.z - e.z).length() < BOARD_R and not waves._dead:
@@ -552,9 +588,9 @@ func _update_ui() -> void:
 		"wait_nav": s += "  příprava…"
 		"active":
 			for l in mission.lines(): s += "  • %s\n" % l
-		"extract": s += "  • Úkol splněn\n  • Zavolej vrtulník z vysílačky u výsadku\n"
-		"wait_heli": s += "  • Vrtulník za %d s – drž se u výsadku\n" % ceili(maxf(_heli_t, 0.0))
-		"board": s += "  • Vrtulník je tu – běž do světla!\n"
+		"extract": s += "  • Úkol splněn\n" + ("  • Vrať se k člunu a nastartuj motor\n" if boat_mode else "  • Zavolej vrtulník z vysílačky u výsadku\n")
+		"wait_heli": s += ("  • Motor se zahřívá – braň člun %d s\n" if boat_mode else "  • Vrtulník za %d s – drž se u výsadku\n") % ceili(maxf(_heli_t, 0.0))
+		"board": s += "  • Nastup do člunu a odjeď!\n" if boat_mode else "  • Vrtulník je tu – běž do světla!\n"
 	var keys := "[T] zaměřovač %s" % ("zap" if tracker else "vyp")
 	if carrying: keys += "   [G] položit"
 	_obj.text = s + "\n" + keys
@@ -639,10 +675,9 @@ static func _tone(freq: float, dur: float) -> AudioStreamWAV:
 	return w
 
 ## Rotor vrtulníku: hnědý šum s údery listů (smyčka).
-static func _rotor_stream() -> AudioStreamWAV:
+static func _rotor_stream(f := 4.4, tone := 38.0) -> AudioStreamWAV:
 	var rate := 22050
-	var f := 4.4
-	var n := int(rate * 14.0 / f)
+	var n := int(rate * ceilf(3.0 * f) / f)
 	var data := PackedByteArray()
 	data.resize(n * 2)
 	var b := 0.0
@@ -655,7 +690,7 @@ static func _rotor_stream() -> AudioStreamWAV:
 		lp += (w - lp) * 0.12
 		var ph := fmod(i * f / rate, 1.0)
 		var thump := pow(maxf(0.0, 1.0 - ph * 4.0), 2.0)
-		var v := b * 0.55 + lp * (0.25 + thump * 1.3) + sin(TAU * 38.0 * i / rate) * thump * 0.35
+		var v := b * 0.55 + lp * (0.25 + thump * 1.3) + sin(TAU * tone * i / rate) * thump * 0.35
 		data.encode_s16(i * 2, int(clampf(v * 0.7, -1.0, 1.0) * 32767.0))
 	var s := AudioStreamWAV.new()
 	s.format = AudioStreamWAV.FORMAT_16_BITS
@@ -728,11 +763,15 @@ func _run_autotest(dt: float) -> void:
 					_at_t = 3.6
 					return
 		"extract":
-			_goto(main.radio_pos)
+			_goto(main.boat_act if boat_mode else main.radio_pos)
 			_test_e = true
 			_at_t = 3.0
 		"board":
-			_goto(main.extraction_point() + Vector3(2, 0, 0))
+			if boat_mode:
+				_goto(main.boat_act)
+				_test_e = true
+			else:
+				_goto(main.extraction_point() + Vector3(2, 0, 0))
 
 # ------------------------------------------------------------------ testovací panel (F3)
 # Přepnutí mise (stejná / nová mapa), teleport ke všem cílům a cheaty na kontrolu.
@@ -807,6 +846,7 @@ func _build_debug() -> void:
 	# teleporty
 	_head(box, "Teleport")
 	_btn(box, "Tábor (výsadek, vysílačka)", func(): _tp(main.radio_pos))
+	if boat_mode: _btn(box, "Člun", func(): _tp(main.boat_act))
 	if main.get("goal") != null: _btn(box, "Bunkr", func(): _tp(main.goal))
 	if mission.get("wreck_pos") != null: _btn(box, "Vrak vrtulníku", func(): _tp(mission.wreck_pos))
 	var i := 0
@@ -834,6 +874,12 @@ func _build_debug() -> void:
 	_btn(box, "Animace: vysílačka (teleport do tábora)", func():
 		_tp(main.radio_pos)
 		get_tree().create_timer(0.3).timeout.connect(func(): if main.get("radio_node"): show_item(main.radio_node, 2.5, Callable(), true, Vector3(0.1, -0.35, 0.12))))
+	if boat_mode: _btn(box, "Člun: přehrát příjezd", func():
+		toggle_debug()
+		start_arrival())
+	_btn(box, "Plot kolem celé mapy: %s  (nová generace)" % ("ANO" if fence_full else "ne – jen úseky"), func():
+		fence_full = not fence_full
+		_restart_with(mission_id, true))
 	_btn(box, "Rádiová hláška (titulky)", func(): radio("Centrála: Testovací hlášení, slyšíte nás? Příjem.", 4.0))
 	# cheaty
 	_head(box, "Cheaty")
@@ -844,9 +890,10 @@ func _build_debug() -> void:
 		_kill_zombies())
 	_btn(box, "Zabít všechny zombie", _kill_zombies)
 	if state == "active": _btn(box, "Splnit úkol mise", func(): mission.complete())
-	if state in ["active", "extract"]: _btn(box, "Přivolat vrtulník hned (5 s)", func():
+	if state in ["active", "extract"]: _btn(box, "Nastartovat motor hned (5 s)" if boat_mode else "Přivolat vrtulník hned (5 s)", func():
 		if state == "active": mission.finished = true
-		_call_heli()
+		if boat_mode: _start_motor()
+		else: _call_heli()
 		_heli_t = 5.0)
 	_btn(box, "Doplnit zdraví a náboje", func():
 		waves.health = 100.0
@@ -885,7 +932,7 @@ func _run_debug_test() -> void:
 		var el := []
 		for b in _dbg.find_children("*", "Button", true, false):
 			var tx: String = (b as Button).text
-			if "mapa" in tx.to_lower() or "menu" in tx.to_lower() or tx.begins_with("   ") or tx.begins_with("▶"): continue
+			if "mapa" in tx.to_lower() or "menu" in tx.to_lower() or "příjezd" in tx or "Plot" in tx or tx.begins_with("   ") or tx.begins_with("▶"): continue
 			el.append(b)
 		if idx >= el.size(): break
 		var bt: Button = el[idx]
@@ -959,3 +1006,94 @@ func _test_item(kind: String) -> void:
 		var d := place_model(main, main.mission_theme().dictaphone, 0.15, p, 0.0, Vector3(-PI * 0.5, 0, 0))
 		snd("res://audio/radio/radio_click.wav", -4.0, 1.3)
 		show_item(d, 2.6, Callable(), false, Vector3(PI * 0.5 + 0.25, 0, 0))
+
+# ------------------------------------------------------------------ člun: příjezd a odjezd
+
+static func _yaw_to(a: Vector3, b: Vector3) -> float:
+	return atan2(-(b.x - a.x), -(b.z - a.z))
+
+## Příjezd: člun připluje z druhého konce tůně ke břehu, hráč stojí v něm, pak vystoupí na břeh.
+func start_arrival() -> void:
+	_cut = "arrive"
+	_boat_t = 0.0
+	main.boat.global_transform = main.boat_out
+	player.set_physics_process(false)
+	player.control_enabled = false
+	_motor.pitch_scale = 1.0
+	_motor.volume_db = -2.0
+	_motor.play()
+	_seat()
+
+func _start_motor() -> void:
+	state = "wait_heli"
+	_heli_t = float(OS.get_environment("HLADINA_HELI_T")) if OS.get_environment("HLADINA_HELI_T") != "" else BOAT_WAIT
+	_motor.pitch_scale = 0.55
+	_motor.volume_db = -8.0
+	_motor.play()
+	radio("Motor chytl, ale potřebuje se zahřát. Držte člun %d sekund!" % int(_heli_t), 6.0)
+	waves.surge(8)
+
+func _motor_ready() -> void:
+	state = "board"
+	_boat_act.text = "Nastoupit a odjet"
+	_boat_act.hold = 0.8
+	_boat_act.cb = _depart
+	_boat_act.on = true
+	_motor.pitch_scale = 1.0
+	_motor.volume_db = -2.0
+	radio("Motor běží! Nastupte, odjíždíme!", 4.0)
+
+func _depart() -> void:
+	_cut = "depart"
+	_boat_t = 0.0
+	if carrying: release()
+	player.set_physics_process(false)
+	player.control_enabled = false
+	player.weapon.holster()
+	_motor.pitch_scale = 1.15
+	_seat()
+
+func _seat() -> void:
+	var b: Node3D = main.boat
+	var fwd: Vector3 = b.global_basis.z
+	player.teleport(b.global_transform * main.boat_seat, atan2(-fwd.x, -fwd.z), -0.08)
+
+func _update_cut(dt: float) -> void:
+	_boat_t += dt
+	var b: Node3D = main.boat
+	var from: Transform3D = main.boat_out if _cut == "arrive" else main.boat_dock
+	var to: Transform3D = main.boat_dock if _cut == "arrive" else main.boat_out
+	var dur := ARRIVE_T if _cut == "arrive" else DEPART_T
+	var k := clampf(_boat_t / dur, 0.0, 1.0)
+	k = k * k * (3.0 - 2.0 * k)
+	var xf := Transform3D(from.basis.slerp(to.basis, k), from.origin.lerp(to.origin, k))
+	xf.origin.y += sin(_boat_t * 2.2) * 0.04
+	xf.basis = xf.basis * Basis(Vector3.RIGHT, sin(_boat_t * 1.7) * 0.03)
+	b.global_transform = xf
+	_seat()
+	# brázda
+	_wake_t -= dt
+	if _wake_t <= 0.0 and main.sim and k < 0.98:
+		_wake_t = 0.12
+		var st: Vector3 = b.global_transform * Vector3(0, 0, -2.4)
+		main.sim.add_impulse(Vector2(st.x, st.z), 0.7, -1.4)
+	if _cut == "arrive":
+		_motor.volume_db = lerpf(-2.0, -14.0, clampf((_boat_t - dur * 0.6) / (dur * 0.4), 0.0, 1.0))
+		if _boat_t >= dur + 0.5:
+			_cut = ""
+			_motor.stop()
+			print("Člun: příjezd hotový, hráč na břehu ", main.boat_shore.snapped(Vector3.ONE * 0.1), " tůň ", main.pond)
+			player.set_physics_process(true)
+			player.teleport(main.boat_shore, _yaw_to(main.boat_shore, main.goal), -0.05)
+			if state != "done" and state != "failed": player.control_enabled = true
+	elif _boat_t >= 3.2 and state != "done":
+		_finish(true)
+
+func _bob() -> void:
+	var b: Node3D = main.boat
+	if b == null: return
+	var tt := Time.get_ticks_msec() / 1000.0
+	var xf: Transform3D = main.boat_dock
+	xf.origin.y += sin(tt * 1.1) * 0.03
+	xf.basis = xf.basis * Basis(Vector3.RIGHT, sin(tt * 0.8) * 0.015) * Basis(Vector3.FORWARD, cos(tt * 0.6) * 0.02)
+	b.global_transform = xf

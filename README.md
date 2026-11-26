@@ -286,6 +286,9 @@ Menu → **The swamp (prototype)**, scéna `swamp.tscn`, kód `scripts/swamp.gd`
 kam svítí baterka (F). Všude kalná voda po kolena, ostrůvky, hlubší tůně, suché stromy, keře, rákos a kameny.
 Mapa se při každém spuštění vygeneruje jinak (pevný seed pro test: proměnná prostředí `SWAMP_SEED=123`).
 Od místa výsadku vede k polozatopenému sovětskému bunkru rozpadlá lávka a cedule; bunkr je poznat podle červeného světla.
+Příjezd a odjezd člunem: u výsadku je hluboká tůň s nafukovacím člunem (lucerna na zádi). Na začátku člun připluje a hráč vystoupí na břeh
+(`HLADINA_NO_INTRO=1` přeskočí). Po splnění úkolu se u člunu podrží E (nastartovat motor), 30 s se brání, pak „Nastoupit a odjet“.
+Plot kolem celé mapy je výchozí; v testovacím panelu F3 jde přepnout na úseky (nová generace stejné mapy).
 Hranice mapy: u kraje se dno zvedá v blátivý břeh a po celém obvodu stojí hustý les (borovice, suché stromy, keře) – konstanta `WALL`.
 Bouřka (blesk a hrom v dálce) se vypíná konstantou `THUNDER` nahoře v `swamp.gd`.
 Test boje (`scripts/swamp_waves.gd`): AK-47, MP 40, IŽ-54 a Desert Eagle (1–4 nebo kolečko, nekonečná zásoba),

@@ -16,6 +16,7 @@ Modely ze Sketchfabu. Upraveno: změna měřítka, rozdělení na varianty, list
 | models/river_rocks.glb | River Rocks | eb78 | Sketchfab Standard | https://sketchfab.com/3d-models/river-rocks-8e10119e576f498fa5113139142e6949 |
 | models/rocks.glb | Rocks | Studio Lab | **„Copyright to Studio Lab“ – OVĚŘIT před vydáním** | https://sketchfab.com/3d-models/rocks-3c14c9eb84a94cd1a353849607ea2550 |
 | models/fence.glb | Fence | adventurer | CC-BY-4.0 | https://sketchfab.com/3d-models/fence-0adbc93269c94b70b99d0627a3ee54f5 |
+| models/assault_boat.glb | Assault Boat (zjednodušeno na ~90k trojúhelníků, textury 1024 px) | wojlinek | CC-BY-4.0 | https://sketchfab.com/3d-models/assault-boat-ba30277a367146d9a41cf8d12750e1fd |
 | models/corpse_back.glb, corpse_front.glb, corpse_side.glb | Soldier Character (nakostěno a napózováno jako mrtvá těla) | Muhamad Mirza Arrafi | CC BY 4.0 | https://sketchfab.com/3d-models/soldier-character (účet nazidefenseforceofficial) |
 | models/tent_military.glb | Tent_Military | Mehdi Shahsavan | CC BY 4.0 | https://sketchfab.com/ahmagh2e |
 | models/army_transmitter.glb | Army transmitter | helsenmet | CC BY 4.0 | https://sketchfab.com/helsenmet |
