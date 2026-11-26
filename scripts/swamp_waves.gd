@@ -143,7 +143,7 @@ func _spawn_one() -> bool:
 	for attempt in 14:
 		var a := randf() * TAU
 		var p := here + Vector3(cos(a), 0.0, sin(a)) * randf_range(15.0, 26.0)
-		if absf(p.x) > main.R - 6.0 or absf(p.z) > main.R - 6.0: continue
+		if absf(p.x) > main.R - main.WALL - 1.5 or absf(p.z) > main.R - main.WALL - 1.5: continue
 		# přednostně z míst, kam se hráč nedívá
 		var to: Vector3 = p - player.camera.global_position
 		to.y = 0.0

@@ -144,7 +144,7 @@ func _emerge() -> void:
 	for attempt in 20:
 		var a := randf() * TAU
 		var p := here + Vector3(cos(a), 0.0, sin(a)) * randf_range(22.0, 32.0)
-		if absf(p.x) > main.R - 6.0 or absf(p.z) > main.R - 6.0: continue
+		if absf(p.x) > main.R - main.WALL - 1.5 or absf(p.z) > main.R - main.WALL - 1.5: continue
 		var dir := (p - here).normalized()
 		if dir.dot(Vector3(look.x, 0, look.z).normalized()) > -0.2 and attempt < 15: continue
 		p.y = main.ground(p.x, p.z)

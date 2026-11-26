@@ -286,6 +286,7 @@ Menu → **The swamp (prototype)**, scéna `swamp.tscn`, kód `scripts/swamp.gd`
 kam svítí baterka (F). Všude kalná voda po kolena, ostrůvky, hlubší tůně, suché stromy, keře, rákos a kameny.
 Mapa se při každém spuštění vygeneruje jinak (pevný seed pro test: proměnná prostředí `SWAMP_SEED=123`).
 Od místa výsadku vede k polozatopenému sovětskému bunkru rozpadlá lávka a cedule; bunkr je poznat podle červeného světla.
+Hranice mapy: u kraje se dno zvedá v blátivý břeh a po celém obvodu stojí hustý les (borovice, suché stromy, keře) – konstanta `WALL`.
 Bouřka (blesk a hrom v dálce) se vypíná konstantou `THUNDER` nahoře v `swamp.gd`.
 Test boje (`scripts/swamp_waves.gd`): AK-47, MP 40, IŽ-54 a Desert Eagle (1–4 nebo kolečko, nekonečná zásoba),
 vlny zombie z hlavní hry (kola, víc a rychlejší), zdraví hráče, po smrti znovu od 1. kola. `SWAMP_DEBUG=1` vypisuje stav kol.

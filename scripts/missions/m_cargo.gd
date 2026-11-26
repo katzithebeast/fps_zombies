@@ -37,7 +37,7 @@ func place() -> void:
 			var a: float = main.rng.randf() * TAU
 			var d: float = main.rng.randf_range(6.0, 17.0)
 			p = wreck_pos + Vector3(cos(a) * d, 0, sin(a) * d)
-			if absf(p.x) > main.R - 8.0 or absf(p.z) > main.R - 8.0: continue
+			if absf(p.x) > main.R - main.WALL - 3.0 or absf(p.z) > main.R - main.WALL - 3.0: continue
 			var ok := true
 			for c in cases:
 				if (c.pos as Vector3).distance_to(p) < 5.0: ok = false

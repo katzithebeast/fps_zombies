@@ -34,6 +34,7 @@ var seed_used := 0
 var noise := FastNoiseLite.new()
 var detail := FastNoiseLite.new()
 var islands := FastNoiseLite.new()
+const WALL := 9.5                 # hranice mapy: hráč dojde jen R - WALL od středu, dál je břeh a hustý les
 const THUNDER := true             # bouřka v dálce (blesk + hrom); false = jen déšť
 
 var spawn := Vector3.ZERO
@@ -107,6 +108,7 @@ func _ready() -> void:
 	_load_variants()
 	_build_boardwalk()
 	_scatter()
+	if OS.get_environment("SWAMP_NOWALL") != "1": _build_forest_wall()
 	_flush_batches()
 	_build_bunker()
 	_build_barrels()
@@ -170,6 +172,10 @@ func height(x: float, z: float) -> float:
 	h = lerpf(h, 0.22 + d * 0.25, smoothstep(0.38, 0.6, i))
 	# hlubší tůně (až po pás)
 	h = lerpf(h, -1.05 + d * 0.1, smoothstep(0.42, 0.62, -n))
+	# okraj mapy: voda končí blátivým břehem, který stoupá do lesa (hranice z dálky vlní šum)
+	var e := maxf(absf(x), absf(z)) + detail.get_noise_2d(x * 0.35, z * 0.35) * 2.5
+	var kb := smoothstep(R - 17.0, R - 6.0, e)
+	if kb > 0.0: h = lerpf(h, 0.3 + d * 0.15 + kb * kb * 2.4, kb)
 	# ostrůvek u výsadku a u bunkru
 	for c in [spawn, goal]:
 		var k := 1.0 - smoothstep(4.5, 9.0, Vector2(x - c.x, z - c.z).length())
@@ -717,6 +723,19 @@ func _flush_batches() -> void:
 	var root := Node3D.new()
 	root.name = "Vegetace"
 	add_child(root)
+	if OS.get_environment("SWAMP_STATS") == "1":
+		var per := {}
+		for k in _batches:
+			var bb: Dictionary = _batches[k]
+			var tris := 0
+			for si in (bb.mesh as Mesh).get_surface_count():
+				var arr: Array = (bb.mesh as Mesh).surface_get_arrays(si)
+				tris += (arr[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3 if arr[Mesh.ARRAY_INDEX] != null else (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() / 3
+			var key: String = k.get_slice("|", 0)
+			per[key] = per.get(key, [0, 0])
+			per[key][0] += bb.xf.size()
+			per[key][1] += tris * bb.xf.size()
+		print("VEGETACE: ", per, " batchů ", _batches.size())
 	for k in _batches:
 		var b: Dictionary = _batches[k]
 		var mm := MultiMesh.new()
@@ -819,6 +838,45 @@ func _scatter() -> void:
 		nb += 1
 	# kameny čouhající z vody i na ostrůvcích
 	_scatter_kind("rock", 280, -0.8, 3.0, 0.3, 1.0, {"vis": 32.0, "clear": 3.0, "sink": 0.1})
+
+## Hranice mapy: po celém obvodu hustý les v několika řadách (stromy s kmeny do kolizí a navigace)
+## a před ním neprostupné křoví. Neviditelná stěna stojí těsně před první řadou křoví.
+func _build_forest_wall() -> void:
+	# lehké modely (kapradí a duby jsou na tolik kusů moc těžké)
+	var trees := [["pine", 0.6, 10.0, 16.0, 0.25], ["dead", 0.4, 8.0, 13.0, 0.35]]
+	var bushes := [["pbush", 1.0, 2.0], ["pbush", 0.8, 1.5], ["plant", 0.6, 1.1]]
+	var rows := [  # [odsazení od kraje, rozestup, druh, stín]
+		[WALL - 0.3, 0.75, "bush", true], [WALL - 1.5, 1.9, "tree", true], [WALL - 2.8, 1.8, "bush", false],
+		[5.6, 3.0, "tree", false], [2.6, 3.4, "tree", false],
+	]
+	for row in rows:
+		var inset: float = row[0]
+		var stepv: float = row[1]
+		for side in 4:
+			var t := -R + rng.randf() * stepv
+			while t < R:
+				t += stepv * rng.randf_range(0.75, 1.25)
+				var off := inset + rng.randf_range(-0.6, 0.6)
+				var a := R - off
+				var p := Vector2(t, a) if side == 0 else (Vector2(t, -a) if side == 1 else (Vector2(a, t) if side == 2 else Vector2(-a, t)))
+				if absf(p.x) > R - 0.3 or absf(p.y) > R - 0.3: continue
+				var gy := ground(p.x, p.y)
+				if row[2] == "tree":
+					var roll := rng.randf()
+					var pick: Array = trees[0]
+					for tr in trees:
+						roll -= float(tr[1])
+						if roll <= 0.0:
+							pick = tr
+							break
+					var sz := rng.randf_range(float(pick[2]), float(pick[3]))
+					var pos := Vector3(p.x, gy - 0.25, p.y)
+					_place(pick[0], pos, sz, rng.randf() * TAU, rng.randf_range(-0.06, 0.06), 100.0, row[3])
+					_mark_tree(p.x, p.y)
+					_add_trunk(pos, float(pick[4]) * sz / 10.0)
+				else:
+					var b: Array = bushes[rng.randi() % bushes.size()]
+					_place(b[0], Vector3(p.x, gy - 0.05, p.y), rng.randf_range(float(b[1]), float(b[2])), rng.randf() * TAU, 0.0, 45.0, row[3])
 
 # =================================================================== lávka, bunkr, sudy, cedule
 
@@ -1210,7 +1268,7 @@ func _build_bounds() -> void:
 		bs.size = Vector3(2.0 * R + 4.0 if horiz else 2.0, 30.0, 2.0 if horiz else 2.0 * R + 4.0)
 		cs.shape = bs
 		var s := 1.0 if i % 2 == 0 else -1.0
-		cs.position = Vector3(0.0 if horiz else s * (R - 2.0), 10.0, s * (R - 2.0) if horiz else 0.0)
+		cs.position = Vector3(0.0 if horiz else s * (R - WALL + 1.0), 10.0, s * (R - WALL + 1.0) if horiz else 0.0)
 		body.add_child(cs)
 
 # =================================================================== bludičky
@@ -1812,8 +1870,8 @@ func mission_points(n: int, opts := {}) -> Array:
 	for pass_i in 5:
 		for attempt in 2500:
 			if out.size() >= n: break
-			var x := rng.randf_range(-R + 10.0, R - 10.0)
-			var z := rng.randf_range(-R + 10.0, R - 10.0)
+			var x := rng.randf_range(-R + WALL + 5.0, R - WALL - 5.0)
+			var z := rng.randf_range(-R + WALL + 5.0, R - WALL - 5.0)
 			var h := ground(x, z)
 			if where == "land" and h < 0.06: continue
 			if where == "water" and (h > -0.2 or h < -0.85): continue
