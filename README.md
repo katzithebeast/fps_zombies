@@ -318,6 +318,8 @@ Nová mise = skript dědící `missions/mission.gd` (place, start, tick, lines, 
 
 **Testovací panel: F3** (myš se uvolní): přepnutí mise na stejné mapě, nová mapa, teleport k táboru, bunkru, vraku a ke všem cílům mise
 (s fajfkou u hotových), bažinák hned / teleport k němu, nesmrtelnost, zombie vyp/zap, zabít zombie, splnit úkol, vrtulník za 5 s, doplnit zdraví a náboje.
+Sekce *Novinky*: shodit tělo přede mě, znovu shodit všechna těla, kopnout do nejbližšího, teleport k tělu,
+animace sebrání (diktafon, zkumavka, vysílačka) a zkušební rádiová hláška.
 
 Testy: `HLADINA_MISSION_TEST=1` misi sám odehraje (`HLADINA_HELI_T=4` zkrátí čekání na vrtulník, `HLADINA_TEST_DIE=1` test selhání).
 Náhledy bez hráče: `SWAMP_NOPLAYER=1 HLADINA_MISSION=cargo SWAMP_SHOTS="camp;act0;far0"`.

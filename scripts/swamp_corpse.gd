@@ -22,6 +22,7 @@ var bodies := {}            # jméno kosti -> PhysicalBone3D
 
 ## pose: 0 = na zádech, 1 = na břiše, 2 = na boku. Uzel musí být ve stromu a na místě (nad zemí).
 func setup(pose: int, rng: RandomNumberGenerator) -> void:
+	add_to_group("swamp_corpse")
 	var m: Node3D = (load(MODEL) as PackedScene).instantiate()
 	add_child(m)
 	skeleton = m.find_children("*", "Skeleton3D", true, false)[0]

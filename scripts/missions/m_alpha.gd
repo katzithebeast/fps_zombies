@@ -26,16 +26,7 @@ func _sample() -> void:
 	sampled = true
 	director.snd("res://audio/syringe_inject.wav", -2.0, 0.8)
 	# zkumavka se vzorkem: z těla k obličeji, pak do kapsy
-	var vial := Node3D.new()
-	main.add_child(vial)
-	vial.global_position = body_pos + Vector3(0, 0.4, 0)
-	director.box(vial, Vector3(0.025, 0.11, 0.025), Vector3.ZERO, Color(0.3, 0.9, 0.35), 2.5)
-	director.box(vial, Vector3(0.03, 0.025, 0.03), Vector3(0, 0.065, 0), Color(0.6, 0.1, 0.08))
-	var l := OmniLight3D.new()
-	l.light_color = Color(0.35, 1.0, 0.4)
-	l.light_energy = 0.5
-	l.omni_range = 1.2
-	vial.add_child(l)
+	var vial: Node3D = director.make_vial(body_pos + Vector3(0, 0.4, 0))
 	director.show_item(vial, 1.6, complete, false, Vector3(0.1, 0, 0.3))
 
 func lines() -> Array:

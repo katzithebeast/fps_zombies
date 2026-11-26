@@ -165,6 +165,20 @@ func show_item(node: Node3D, hold := 2.0, done := Callable(), put_back := false,
 		if was_armed and carrying == null: player.weapon.switch_to(player.weapon.current)
 		if done.is_valid(): done.call())
 
+## Zkumavka se svítícím vzorkem (hon na alfu, test).
+func make_vial(pos: Vector3) -> Node3D:
+	var vial := Node3D.new()
+	main.add_child(vial)
+	vial.global_position = pos
+	box(vial, Vector3(0.025, 0.11, 0.025), Vector3.ZERO, Color(0.3, 0.9, 0.35), 2.5)
+	box(vial, Vector3(0.03, 0.025, 0.03), Vector3(0, 0.065, 0), Color(0.6, 0.1, 0.08))
+	var l := OmniLight3D.new()
+	l.light_color = Color(0.35, 1.0, 0.4)
+	l.light_energy = 0.5
+	l.omni_range = 1.2
+	vial.add_child(l)
+	return vial
+
 ## Rádiová hláška (titulky + šum).
 func radio(text: String, dur := 6.0) -> void:
 	_subs.append([text, dur, true])
@@ -801,6 +815,20 @@ func _build_debug() -> void:
 			waves.alpha.enabled = true
 			if waves.alpha.state == "hidden": waves.alpha._t = 0.0)
 		if waves.alpha.state == "stalk": _btn(box, "Bažinák: teleport k němu", func(): _tp(waves.alpha.global_position))
+	# novinky: ragdoll a animace sebrání
+	_head(box, "Novinky – ragdoll a sebrání")
+	_btn(box, "Tělo: shodit přede mě", _test_corpse_ahead)
+	_btn(box, "Těla: všechna znovu shodit (%d)" % get_tree().get_nodes_in_group("swamp_corpse").size(), _test_redrop)
+	_btn(box, "Tělo: kopnout do nejbližšího", _test_kick)
+	_btn(box, "Teleport k nejbližšímu tělu", func():
+		var c := _nearest_corpse()
+		if c: _tp(c.center()))
+	_btn(box, "Animace: diktafon k obličeji", func(): _test_item("dictaphone"))
+	_btn(box, "Animace: zkumavka se vzorkem", func(): _test_item("vial"))
+	_btn(box, "Animace: vysílačka (teleport do tábora)", func():
+		_tp(main.radio_pos)
+		get_tree().create_timer(0.3).timeout.connect(func(): if main.get("radio_node"): show_item(main.radio_node, 2.5, Callable(), true, Vector3(0.1, -0.35, 0.12))))
+	_btn(box, "Rádiová hláška (titulky)", func(): radio("Centrála: Testovací hlášení, slyšíte nás? Příjem.", 4.0))
 	# cheaty
 	_head(box, "Cheaty")
 	_btn(box, "Nesmrtelnost: " + ("ZAP" if god else "vyp"), func(): god = not god)
@@ -868,3 +896,60 @@ func _run_debug_test() -> void:
 	print("PANEL: tlačítek teleportu ", tps)
 	_dbg_test_round = 1
 	_restart_with("cargo", true)
+
+# ------------------------------------------------------------------ testy novinek (panel F3)
+
+func _ahead(d: float) -> Vector3:
+	var f: Vector3 = -player.camera.global_basis.z
+	f.y = 0.0
+	var p: Vector3 = player.global_position + f.normalized() * d
+	p.y = main.ground(p.x, p.z)
+	return p
+
+func _new_corpse(p: Vector3, yaw: float) -> Node3D:
+	var c := Node3D.new()
+	c.set_script(load("res://scripts/swamp_corpse.gd"))
+	main.add_child(c)
+	c.global_position = p + Vector3(0, 0.6, 0)
+	c.rotation.y = yaw
+	c.setup(main.rng.randi() % 3, main.rng)
+	return c
+
+func _test_corpse_ahead() -> void:
+	_new_corpse(_ahead(2.2), player.yaw)
+
+func _test_redrop() -> void:
+	for c in get_tree().get_nodes_in_group("swamp_corpse"):
+		var p: Vector3 = c.center()
+		p.y = main.ground(p.x, p.z)
+		var yaw: float = main.rng.randf() * TAU
+		c.remove_from_group("swamp_corpse")
+		c.queue_free()
+		_new_corpse(p, yaw)
+
+func _nearest_corpse() -> Node3D:
+	var best: Node3D = null
+	var bd := 1e9
+	for c in get_tree().get_nodes_in_group("swamp_corpse"):
+		var d: float = c.center().distance_to(player.global_position)
+		if d < bd:
+			bd = d
+			best = c
+	return best
+
+func _test_kick() -> void:
+	var c := _nearest_corpse()
+	if c == null: return
+	var dir: Vector3 = (c.center() - player.global_position)
+	dir.y = 0.0
+	for n in ["chest", "hips", "thigh.L"]:
+		c.bodies[n].apply_central_impulse(dir.normalized() * 30.0 + Vector3.UP * 14.0)
+
+func _test_item(kind: String) -> void:
+	var p := _ahead(0.9) + Vector3(0, 0.05, 0)
+	if kind == "vial":
+		show_item(make_vial(p + Vector3(0, 0.3, 0)), 1.6, Callable(), false, Vector3(0.1, 0, 0.3))
+	else:
+		var d := place_model(main, main.mission_theme().dictaphone, 0.15, p, 0.0, Vector3(-PI * 0.5, 0, 0))
+		snd("res://audio/radio/radio_click.wav", -4.0, 1.3)
+		show_item(d, 2.6, Callable(), false, Vector3(PI * 0.5 + 0.25, 0, 0))
