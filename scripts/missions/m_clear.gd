@@ -15,7 +15,9 @@ func start() -> void:
 func lines() -> Array:
 	var w: Node = director.waves
 	var alive: int = w._alive() + w._to_spawn
-	if w.round_now == 0: return ["Vlna 1/%d začíná…" % ROUNDS]
+	if w.round_now == 0: return ["Vlna 1/%d začne za %d s" % [ROUNDS, ceili(w._pause)]]
+	if alive == 0 and w.round_now < ROUNDS:
+		return ["Vlna %d/%d hotová – další za %d s" % [w.round_now, ROUNDS, ceili(w._pause)]]
 	return ["Vlna %d/%d – zbývá %d" % [w.round_now, ROUNDS, alive]]
 
 ## Zaměřovač vede k posledním zombie (ať se nedá schovat ve tmě).

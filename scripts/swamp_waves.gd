@@ -402,7 +402,11 @@ func _update_hud() -> void:
 		gun = "%s  %d/∞" % [w.stats().name, w.ammo]
 	var r := "navigace se počítá…" if not _nav_ready else ("kolo %d   zombie %d" % [round_now, _alive() + _to_spawn] if round_now > 0 else "kolo začne za %d s" % ceili(_pause))
 	if mode != "rounds" and _nav_ready: r = ""
-	elif max_rounds > 0 and _nav_ready: r = ("vlna %d/%d   zombie %d" % [round_now, max_rounds, _alive() + _to_spawn]) if round_now > 0 else "vlna začne za %d s" % ceili(_pause)
+	elif max_rounds > 0 and _nav_ready:
+		var left := _alive() + _to_spawn
+		if round_now == 0: r = "vlna začne za %d s" % ceili(_pause)
+		elif left == 0 and round_now < max_rounds: r = "další vlna za %d s" % ceili(_pause)
+		else: r = "vlna %d/%d   zombie %d" % [round_now, max_rounds, left]
 	_hud.text = "%s   zdraví %d\n%s" % [r, maxi(0, ceili(health)), gun]
 
 # ------------------------------------------------------------------ test (SWAMP_COMBAT_TEST=1, SWAMP_OUT)
