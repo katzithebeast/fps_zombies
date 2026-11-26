@@ -10,6 +10,9 @@ const HEIGHT := 2.5
 const SPEED := 4.2               # m/s, když se nikdo nedívá
 const MAX_HP := 2400.0
 
+signal died(pos: Vector3)
+
+var enabled := true               # režisér misí ho zapíná jen v honu na alfu (nebo vzácně jako bonus)
 var main: Node3D
 var waves: Node
 var player: CharacterBody3D
@@ -71,6 +74,10 @@ func setup(m: Node3D, w: Node) -> void:
 	_t = randf_range(45.0, 70.0)
 	if OS.get_environment("SWAMP_ALPHA_T") != "": _t = float(OS.get_environment("SWAMP_ALPHA_T"))     # test
 
+## Hon na alfu: vynoří se dřív.
+func hunt() -> void:
+	_t = randf_range(20.0, 35.0)
+
 func reset() -> void:
 	hp = MAX_HP
 	_phase = 0
@@ -107,7 +114,7 @@ func _process(dt: float) -> void:
 	_stinger_cd = maxf(0.0, _stinger_cd - dt)
 	match state:
 		"hidden":
-			if waves._dead or not waves._nav_ready: return
+			if not enabled or waves._dead or not waves._nav_ready: return
 			_t -= dt
 			if _t <= 0.0: _emerge()
 		"stalk":
@@ -227,6 +234,7 @@ func shot(point: Vector3, direction: Vector3, damage: float) -> void:
 		_area.collision_layer = 0
 		main.sfx.play("round_end", -2.0)
 		main._say("Bažinák je mrtvý.")
+		died.emit(global_position)
 		return
 	var phase := int((1.0 - hp / MAX_HP) * 3.0)
 	if phase > _phase:

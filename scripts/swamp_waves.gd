@@ -21,6 +21,13 @@ var _regen := 0.0
 var _dead := false
 var _fx: Node3D
 var alpha: Node3D
+var director: Node                 # režisér misí (missions/mission_director.gd); bez něj nekonečné vlny
+var mode := "rounds"               # rounds = vlny | ambient = pár zombie pořád kolem | off
+var max_rounds := 0                # 0 = nekonečno
+var ambient_cap := 6
+var _amb_t := 6.0
+var _elapsed := 0.0
+signal rounds_done
 var _nav_ready := false
 var _nav_region: RID
 var _hud: Label
@@ -67,6 +74,9 @@ static func reset_statics() -> void:
 
 ## Síť pro zombie z kolizí bažiny (terén i pod vodou, kmeny, kameny, bunkr). Peče se na vlákně.
 func _bake_navigation() -> void:
+	if OS.get_environment("SWAMP_NOZOMBIES") == "1":      # snímky v kontejneru (málo paměti na pečení i vykreslování)
+		_nav_ready = true
+		return
 	var mesh := NavigationMesh.new()
 	mesh.cell_size = NAV_CELL
 	mesh.cell_height = 0.1
@@ -179,7 +189,22 @@ func _process(dt: float) -> void:
 			print("kolo ", round_now, " naživu ", _alive(), " zbývá ", _to_spawn, " zdraví ", int(health), " nejbližší ", snappedf(d, 0.1))
 	_regen -= dt
 	if _regen <= 0.0: health = minf(100.0, health + dt * 18.0)
-	if _to_spawn <= 0 and _alive() == 0:
+	_elapsed += dt
+	if mode == "off" and _to_spawn <= 0: return
+	if mode == "ambient":
+		# pár zombie pořád kolem; časem jich přibývá a jsou silnější
+		round_now = 1 + int(_elapsed / 150.0)
+		_amb_t -= dt
+		var cap := mini(ambient_cap, 2 + int(_elapsed / 50.0))
+		if _amb_t <= 0.0 and _to_spawn <= 0 and _alive() < cap:
+			_amb_t = randf_range(4.0, 9.0)
+			_to_spawn = 1
+	elif _to_spawn <= 0 and _alive() == 0:
+		if max_rounds > 0 and round_now >= max_rounds:
+			mode = "ambient"
+			_elapsed = 0.0
+			rounds_done.emit()
+			return
 		if round_now > 0 and _pause == 8.0:
 			main.sfx.play("round_end", -4.0)
 		_pause -= dt
@@ -214,11 +239,20 @@ func hurt(damage: float, source: Node3D) -> void:
 	player.pitch = clampf(player.pitch + randf_range(0.03, 0.07), -1.5, 1.5)
 	if health <= 0.0: _die()
 
+## Nával zombie (volání vrtulníku, sonda…).
+func surge(n: int) -> void:
+	if OS.get_environment("SWAMP_NOZOMBIES") == "1": return
+	_to_spawn += n
+	_spawn_t = minf(_spawn_t, 1.5)
+
 func _die() -> void:
 	_dead = true
 	health = 0.0
 	player.control_enabled = false
 	main.sfx.play("game_over", -2.0)
+	if director:
+		director.player_died()
+		return
 	main._say("Padl jsi v kole %d (%d zabitých). Začíná se znovu…" % [round_now, kills])
 	get_tree().create_timer(5.0).timeout.connect(_restart)
 
@@ -363,6 +397,8 @@ func _update_hud() -> void:
 	if w.equipped:
 		gun = "%s  %d/∞" % [w.stats().name, w.ammo]
 	var r := "navigace se počítá…" if not _nav_ready else ("kolo %d   zombie %d" % [round_now, _alive() + _to_spawn] if round_now > 0 else "kolo začne za %d s" % ceili(_pause))
+	if mode != "rounds" and _nav_ready: r = ""
+	elif max_rounds > 0 and _nav_ready: r = ("vlna %d/%d   zombie %d" % [round_now, max_rounds, _alive() + _to_spawn]) if round_now > 0 else "vlna začne za %d s" % ceili(_pause)
 	_hud.text = "%s   zdraví %d\n%s" % [r, maxi(0, ceili(health)), gun]
 
 # ------------------------------------------------------------------ test (SWAMP_COMBAT_TEST=1, SWAMP_OUT)

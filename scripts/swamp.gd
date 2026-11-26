@@ -43,6 +43,7 @@ var _n := 0
 var _hs: PackedFloat32Array
 var _path_mask: PackedByteArray
 var _occupied := {}                 # mřížka 2.5 m: kde už stojí strom
+var _veg := {}                      # mřížka 1 m: keře a rostliny vyšší než půl metru (místa pro mise se jim vyhýbají)
 
 var _variants := {}
 var _batches := {}
@@ -69,6 +70,12 @@ var _time := 0.0
 var _moon: DirectionalLight3D
 var sfx: Sfx
 var waves: Node
+var missions: Node                    # režisér misí (scripts/missions/mission_director.gd)
+var map_name := "Bažina"
+var radio_pos := Vector3.ZERO          # vysílačka u výsadku (volání vrtulníku)
+var cargo_drop := Vector3.ZERO         # kam se skládají přinesené bedny
+var _reserved: Array = []              # místa už zabraná misemi
+const Director := preload("res://scripts/missions/mission_director.gd")
 
 func _ready() -> void:
 	add_to_group("swamp_main")
@@ -101,6 +108,7 @@ func _ready() -> void:
 	_build_bunker()
 	_build_barrels()
 	_build_signs()
+	_build_camp()
 	_build_bounds()
 	_build_rain()
 	_build_mist_banks()
@@ -114,6 +122,14 @@ func _ready() -> void:
 		waves = load("res://scripts/swamp_waves.gd").new()
 		add_child(waves)
 		waves.setup(self)
+		if OS.get_environment("SWAMP_NO_MISSION") != "1":
+			missions = Director.new()
+			add_child(missions)
+			missions.setup(self)          # rozmístí věci mise ještě před pečením navigace
+	elif OS.get_environment("HLADINA_MISSION") != "":
+		missions = Director.new()
+		add_child(missions)
+		missions.setup_preview(self)
 	if OS.get_environment("SWAMP_SHOTS") != "":
 		_run_shots.call_deferred()
 
@@ -684,6 +700,7 @@ func _place(key: String, pos: Vector3, h: float, yaw: float, tilt := 0.0, vis :=
 		b = Basis(Vector3(cos(ang), 0.0, sin(ang)), tilt) * b
 	var xf := Transform3D(b * Basis.from_scale(Vector3.ONE * h), pos)
 	var cell := Vector2i(floori(pos.x / CHUNK), floori(pos.z / CHUNK))
+	if h >= 0.5: _veg[Vector2i(floori(pos.x), floori(pos.z))] = h
 	var parts: Array = v.parts
 	for i in parts.size():
 		var mesh: Mesh = parts[i][0]
@@ -1609,7 +1626,7 @@ func _build_player() -> void:
 		_make_flashlight(cam)
 		return
 	var P := preload("res://scripts/player.gd")
-	preload("res://scripts/weapon_rig.gd").skip_gun_models = false      # se zbraněmi
+	preload("res://scripts/weapon_rig.gd").skip_gun_models = OS.get_environment("SWAMP_NOGUNS") == "1"      # se zbraněmi (bez nich jen pro snímky v kontejneru)
 	P.water_at = Callable()                # hladina je všude stejná (WATER_Y = 0)
 	player = P.new()
 	player.sim = sim        # brodění dělá vlny na hladině
@@ -1657,7 +1674,7 @@ func _build_hud() -> void:
 	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cl.add_child(dot)
 	if OS.get_environment("SWAMP_SHOTS") == "":
-		_say("Bažina: přežij vlny zombie. Střelba LMB, míření RMB, R přebít, Q úder, 1–4 zbraně, F baterka, H hledí, Esc menu.")
+		_say("LMB střelba, RMB míření, R přebít, Q úder, 1–4 zbraně, F baterka, H otřít hledí, E použít, T zaměřovač, Esc menu.")
 
 func _say(t: String) -> void:
 	_toast.text = t
@@ -1673,7 +1690,12 @@ func _input(event: InputEvent) -> void:
 				get_tree().change_scene_to_file("res://main.tscn")
 			KEY_H:
 				if visor and visor.enabled: visor.wipe()
+			KEY_T:
+				if missions: missions.toggle_tracker()
+			KEY_G:
+				if missions: missions.drop()
 			KEY_1, KEY_2, KEY_3, KEY_4:
+				if missions and missions.carrying: missions.drop()
 				if player:
 					var order := ["ak", "mp40", "izh54", "deagle"]
 					player.weapon.switch_to(order[event.physical_keycode - KEY_1])
@@ -1755,6 +1777,115 @@ func _process(dt: float) -> void:
 		_goal_said = true
 		_say("Bunkr. Dveře jsou pootevřené a uvnitř něco zeleně svítí… (pokračování příště)")
 
+# =================================================================== rozhraní pro mise
+
+func mission_theme() -> Dictionary:
+	return {
+		"corpses": [MD + "corpse_back.glb", MD + "corpse_front.glb", MD + "corpse_side.glb"],
+		"dictaphone": MD + "dictaphone.glb",
+		"cargo": MD + "cargo_case.glb",
+		"wreck": MD + "crashed_helicopter.glb",
+	}
+
+func extraction_point() -> Vector3:
+	return Vector3(spawn.x, _spawn_y(), spawn.z)
+
+## Body pro mise. opts: where (land | water | any), min_spawn, max_spawn, sep (rozestup), clear (volno od stromů).
+## Při nedostatku míst se podmínky postupně zmírní.
+func mission_points(n: int, opts := {}) -> Array:
+	var out: Array = []
+	var sep: float = opts.get("sep", 20.0)
+	var min_s: float = opts.get("min_spawn", 20.0)
+	var max_s: float = opts.get("max_spawn", 999.0)
+	var clear: float = opts.get("clear", 1.5)
+	var where: String = opts.get("where", "any")
+	for pass_i in 5:
+		for attempt in 2500:
+			if out.size() >= n: break
+			var x := rng.randf_range(-R + 10.0, R - 10.0)
+			var z := rng.randf_range(-R + 10.0, R - 10.0)
+			var h := ground(x, z)
+			if where == "land" and h < 0.06: continue
+			if where == "water" and (h > -0.2 or h < -0.85): continue
+			if where == "any" and h < -0.85: continue
+			var ds := Vector2(x - spawn.x, z - spawn.z).length()
+			if ds < min_s or ds > max_s: continue
+			if Vector2(x - goal.x, z - goal.z).length() < 11.0: continue
+			if clear > 2.5 and _near_path(x, z): continue
+			if not _area_free(x, z, clear): continue
+			var ok := true
+			for q in out:
+				if Vector2(q.x - x, q.z - z).length() < sep: ok = false
+			for q in _reserved:
+				if Vector2(q.x - x, q.z - z).length() < 6.0: ok = false
+			if ok: out.append(Vector3(x, h, z))
+		if out.size() >= n: break
+		sep *= 0.75
+		min_s *= 0.8
+		clear *= 0.7
+		if pass_i >= 2 and where == "land": where = "any"
+	_reserved.append_array(out)
+	return out
+
+func _area_free(x: float, z: float, r: float) -> bool:
+	var c := ceili(r / 2.5) + 1
+	var cx := floori(x / 2.5)
+	var cz := floori(z / 2.5)
+	for dx in range(-c, c + 1):
+		for dz in range(-c, c + 1):
+			if not _occupied.has(Vector2i(cx + dx, cz + dz)): continue
+			var px := (cx + dx + 0.5) * 2.5
+			var pz := (cz + dz + 0.5) * 2.5
+			if Vector2(px - x, pz - z).length() < r + 1.3: return false
+	# keře a rostliny (ať tělo nebo bedna nejsou schované uvnitř keře)
+	var vr := ceili(r + 1.0)
+	for dx in range(-vr, vr + 1):
+		for dz in range(-vr, vr + 1):
+			var c2 := Vector2i(floori(x) + dx, floori(z) + dz)
+			if not _veg.has(c2): continue
+			var hh: float = _veg[c2]
+			if Vector2(c2.x + 0.5 - x, c2.y + 0.5 - z).length() < minf(r, 2.0) + hh * 0.5: return false
+	return true
+
+## Tábor u výsadku: UAZ, stan, vysílačka na bedně s lucernou, kanystry. Sem se nosí náklad a odsud se volá vrtulník.
+func _build_camp() -> void:
+	var root := Node3D.new()
+	root.name = "Tabor"
+	add_child(root)
+	var g := Vector3(goal.x - spawn.x, 0, goal.z - spawn.z).normalized()
+	var side := Vector3(-g.z, 0, g.x)
+	var yaw_g := atan2(g.x, g.z)
+	var at := func(v: Vector3) -> Vector3: return Vector3(v.x, ground(v.x, v.z), v.z)
+	# UAZ zapadlý v bahně na okraji ostrůvku
+	var up: Vector3 = at.call(spawn - g * 6.6 - side * 1.6)
+	var uaz := Director.place_model(root, MD + "uaz_452.glb", 4.7, up + Vector3(0, -0.18, 0), yaw_g + PI * 0.5 + 0.2, Vector3(0.03, 0, -0.04))
+	Director.collider(root, Vector3(2.2, 2.3, 4.5), Transform3D(Basis(Vector3.UP, yaw_g + PI * 0.5 + 0.2), up + Vector3(0, 1.0, 0)))
+	# stan
+	var tp: Vector3 = at.call(spawn - g * 2.6 + side * 5.4)
+	Director.place_model(root, MD + "tent_military.glb", 6.2, tp + Vector3(0, -0.05, 0), yaw_g + PI * 0.5)
+	Director.collider(root, Vector3(5.4, 2.0, 5.0), Transform3D(Basis(Vector3.UP, yaw_g + PI * 0.5), tp + Vector3(0, 1.0, 0)))
+	# bedna s vysílačkou a lucernou
+	var cp: Vector3 = at.call(spawn + side * 2.3 - g * 1.2)
+	var crate := Director.box(root, Vector3(0.75, 0.5, 0.5), cp + Vector3(0, 0.22, 0), Color(0.16, 0.2, 0.12))
+	crate.rotation.y = yaw_g
+	Director.place_model(root, MD + "army_transmitter.glb", 0.55, cp + Vector3(0, 0.47, 0), yaw_g + 0.4)
+	radio_pos = cp + Vector3(0, 0.6, 0)
+	var lamp := OmniLight3D.new()
+	lamp.light_color = Color(1.0, 0.72, 0.42)
+	lamp.light_energy = 1.1
+	lamp.omni_range = 7.0
+	lamp.shadow_enabled = true
+	lamp.light_volumetric_fog_energy = 1.2
+	lamp.position = cp + side * 0.3 + Vector3(0, 0.75, 0)
+	root.add_child(lamp)
+	Director.box(root, Vector3(0.12, 0.18, 0.12), cp + side * 0.3 + Vector3(0, 0.56, 0), Color(1.0, 0.75, 0.45), 2.5)
+	# kanystry u auta
+	for i in 3:
+		var jp: Vector3 = at.call(up + g * 2.3 + side * (i * 0.42 - 0.4))
+		Director.place_model(root, MD + "jerrycan.glb", 0.47, jp, yaw_g + rng.randf_range(-0.3, 0.3))
+	cargo_drop = at.call(spawn - g * 3.6 - side * 1.4)
+	_reserved.append(spawn)
+
 # =================================================================== náhledy
 
 ## SWAMP_SHOTS="spawn;goal;x,z,yaw,pitch;..." uloží PNG do SWAMP_OUT (výchozí user://).
@@ -1797,6 +1928,29 @@ func _run_shots() -> void:
 			var tgt := st + Vector3(o.x, 0, o.y) * 1.0
 			yaw = atan2(-(tgt.x - pos.x), -(tgt.z - pos.z))
 			pitch = -0.25
+		elif s.begins_with("act") and missions:
+			# snímek cíle mise: "act0" = první interakce (tělo, bedna, sonda…)
+			var a: Dictionary = missions._acts[int(s.substr(3)) % missions._acts.size()]
+			var tp: Vector3 = a.pos
+			var off := Vector3(2.6, 0, 1.6)
+			pos = tp + off
+			pos.y = maxf(ground(pos.x, pos.z), WATER_Y) + 1.65
+			yaw = atan2(off.x, off.z)
+			pitch = atan2(tp.y + 0.3 - pos.y, off.length())
+		elif s == "camp":
+			var g := Vector3(goal.x - spawn.x, 0, goal.z - spawn.z).normalized()
+			pos = Vector3(spawn.x, _spawn_y() + 1.65, spawn.z) + g * 3.0
+			yaw = atan2(g.x, g.z)
+			pitch = -0.15
+		elif s.begins_with("far") and missions:
+			# zdálky (12 m) na cíl mise – je vidět světlo?
+			var a: Dictionary = missions._acts[int(s.substr(3)) % missions._acts.size()]
+			var tp: Vector3 = a.pos
+			var off := Vector3(9.0, 0, 8.0)
+			pos = tp + off
+			pos.y = maxf(ground(pos.x, pos.z), WATER_Y) + 1.65
+			yaw = atan2(off.x, off.z)
+			pitch = -0.08
 		elif s.begins_with("top"):
 			pos = Vector3(0, 70, R * 0.9)
 			yaw = 0.0

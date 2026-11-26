@@ -293,6 +293,31 @@ Bažinák (`scripts/swamp_alpha.gd`, test alfy): po ~1 minutě se vynoří ve tm
 nedíváš. Zamrzne, když je v záběru a nezakrytý a zároveň na něj svítí baterka, blýskne se nebo je blíž než 4,5 m.
 Plíží se po navigaci a čvachtá. U hráče udeří (45), ponoří se a vynoří se jinde. Má 2400 HP a po každé ztracené třetině uteče pod hladinu;
 zabitý padne do bahna. `SWAMP_ALPHA_T=3` = vynoří se hned (test).
+
+### Mise (`scripts/missions/`)
+Při každém výjezdu se náhodně vybere jedna mise (vynutit: `HLADINA_MISSION=crew|clear|cargo|probes|alpha`).
+Úkol je vlevo nahoře, u předmětů se drží **E**, **T** zapíná zaměřovač (pípá rychleji, čím blíž je cíl; když se díváš
+správným směrem, pípá výš), **G** položí nesenou věc. Po splnění úkolu se z vysílačky v táboře u výsadku (UAZ, stan, lucerna)
+volá vrtulník: 45 s se brání u výsadku, pak doběhnout do jeho světla. Smrt = mise selhala. Enter = další výjezd (nová mapa i mise).
+
+| Mise | Co se dělá |
+|---|---|
+| `crew` – Najdi předchozí četu | 4 těla na ostrůvcích (u každého svítí jeho baterka), z diktafonů vzít záznamy (titulky s příběhem) |
+| `clear` – Vyčisti oblast | 4 vlny zombie; zaměřovač ukáže poslední zbylé |
+| `cargo` – Vyzvedni náklad | vrak Mi-8 ve vodě s červeným majákem, kolem 3 plovoucí bedny se zelenými světly; nosí se po jedné do tábora (zbraň schovaná, pomalejší chůze) |
+| `probes` – Měřicí sondy | 3 kolíky s majáčkem, postavit sondu, 40 s ji hlídat do 14 m (jinak měření stojí); každá přiláká zombie |
+| `alpha` – Hon na alfu | zabít bažináka a odebrat z těla vzorek tkáně |
+
+Mimo hon na alfu se bažinák objeví jen výjimečně (asi v 15 % výjezdů) jako bonusové zpestření.
+
+**Rozhraní mapy pro mise** (aby šly stejné mise i do bazénů a metra): režisér `missions/mission_director.gd` od mapy chce
+`player, sfx, waves, rng, R, WATER_Y, ground(x, z), mission_points(n, opts), mission_theme(), extraction_point(), radio_pos, cargo_drop, _say()`
+(volitelně `mission_pool()` a `map_name`). `mission_points` vrací místa podle `where` (land/water/any), vzdálenosti od výsadku,
+rozestupu a volna od stromů/keřů; `mission_theme` dává cesty k modelům (těla, diktafon, bedna, vrak), takže každý archetyp má mise ve svém kabátě.
+Nová mise = skript dědící `missions/mission.gd` (place, start, tick, lines, targets, complete) a řádek v `MISSIONS`.
+
+Testy: `HLADINA_MISSION_TEST=1` misi sám odehraje (`HLADINA_HELI_T=4` zkrátí čekání na vrtulník, `HLADINA_TEST_DIE=1` test selhání).
+Náhledy bez hráče: `SWAMP_NOPLAYER=1 HLADINA_MISSION=cargo SWAMP_SHOTS="camp;act0;far0"`.
 V bažině je od začátku zapnutá bodycam (B), VHS kamera (V) a hledí helmy: déšť na něj postupně napadá
 (za ~40 s je celé pokapané) a otírá se klávesou H (ruka přejede po skle, pak začne pršet na čisté). Stromy, keře a kameny mají shader mokré vegetace
 (`shaders/swamp_foliage.gdshader`: přebarvení, lesk a kapky deště, prosvítání listů, vítr). Autoři modelů: `assets/swamp/CREDITS.md`.

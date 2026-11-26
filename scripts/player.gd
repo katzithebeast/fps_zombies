@@ -33,6 +33,7 @@ var control_enabled := true
 var input_suspended := false       # multiplayer menu nepozastavuje svět ani síť
 var interaction_locked := false
 var sprint_lock := false               # střelba a míření ruší sprint
+var speed_scale := 1.0                 # zpomalení (např. nesená bedna v misi)
 var cam_fx: Node = null       # BODYCAM (experiment): scripts/bodycam.gd
 var handheld := 0.0            # 0..1 síla "ruční kamery" (VHS / fisheye režim ji zvedá)
 var base_fov := 75.0
@@ -251,6 +252,7 @@ func _physics_process_timed(dt: float) -> void:
 			_climb_t = 0.12
 	else:
 		var sp := CROUCH_SPEED if crouching else (SPRINT if _sprint else WALK)
+		sp *= speed_scale
 		if submersion > 0.03:
 			sp *= 1.0 - clampf(submersion, 0.0, 1.1) * 0.42       # odpor vody při brodění
 		var acc := 9.0 if on_floor else 2.0
