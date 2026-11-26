@@ -204,7 +204,7 @@ func player_died() -> void:
 	get_tree().create_timer(3.0).timeout.connect(_finish.bind(false))
 
 ## Model z .glb: nejdelší rozměr = size, spodek na pos.y, střed na pos.xz. rot = natočení modelu (např. tělo na zádech).
-static func place_model(parent: Node3D, path: String, size: float, pos: Vector3, yaw := 0.0, rot := Vector3.ZERO) -> Node3D:
+static func place_model(parent: Node3D, path: String, size: float, pos: Vector3, yaw := 0.0, rot := Vector3.ZERO, keep := "") -> Node3D:
 	var pivot := Node3D.new()
 	parent.add_child(pivot)
 	pivot.global_position = pos
@@ -213,6 +213,12 @@ static func place_model(parent: Node3D, path: String, size: float, pos: Vector3,
 	inner.rotation = rot
 	pivot.add_child(inner)
 	var m: Node3D = (load(path) as PackedScene).instantiate()
+	if keep != "":
+		# z modelu s více díly (např. plot ze 4 panelů) nechat jen jeden uzel
+		var k := m.find_child(keep, true, false)
+		if k:
+			for sib in k.get_parent().get_children():
+				if sib != k: sib.free()
 	inner.add_child(m)
 	var inv := pivot.global_transform.affine_inverse()
 	var bb := AABB()

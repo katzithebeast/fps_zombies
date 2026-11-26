@@ -109,6 +109,7 @@ func _ready() -> void:
 	_build_boardwalk()
 	_scatter()
 	if OS.get_environment("SWAMP_NOWALL") != "1": _build_forest_wall()
+	_build_fences()
 	_flush_batches()
 	_build_bunker()
 	_build_barrels()
@@ -877,6 +878,42 @@ func _build_forest_wall() -> void:
 				else:
 					var b: Array = bushes[rng.randi() % bushes.size()]
 					_place(b[0], Vector3(p.x, gy - 0.05, p.y), rng.randf_range(float(b[1]), float(b[2])), rng.randf() * TAU, 0.0, 45.0, row[3])
+
+## Plot zakázané zóny: sem tam na hranici úseky starých plechových panelů (CAUTION, vysoké napětí).
+## Některé panely chybí, jiné jsou nakloněné nebo spadlé do bahna. Stojící mají kolizi.
+func _build_fences() -> void:
+	var root := Node3D.new()
+	root.name = "Ploty"
+	add_child(root)
+	var panels := ["02", "02_2", "02_3", "02_4"]
+	var runs := rng.randi_range(9, 13)
+	var used := []
+	for r in runs:
+		var side := rng.randi() % 4
+		var n := rng.randi_range(3, 8)
+		var w := 1.56                     # šířka panelu při výšce 2.2 m
+		var t0 := rng.randf_range(-R + WALL + 4.0, R - WALL - 4.0 - n * w)
+		var key := Vector2i(side, int(t0 / 12.0))
+		if key in used: continue
+		used.append(key)
+		var a := R - WALL - 0.35
+		if OS.get_environment("SWAMP_STATS") == "1": print("PLOT strana ", side, " od ", snappedf(t0, 0.1), " panelů ", n)
+		for i in n:
+			var t := t0 + (i + 0.5) * w
+			var p := Vector2(t, a) if side == 0 else (Vector2(t, -a) if side == 1 else (Vector2(a, t) if side == 2 else Vector2(-a, t)))
+			var yaw := 0.0 if side < 2 else PI * 0.5
+			var roll := rng.randf()
+			if roll < 0.1: continue                     # chybějící panel
+			var gy := ground(p.x, p.y)
+			if roll < 0.2:
+				# spadlý panel v bahně, kousek před plotem
+				var inward := Vector2(0, -1 if side == 0 else 1) if side < 2 else Vector2(-1 if side == 2 else 1, 0)
+				var fp := p + inward * rng.randf_range(1.0, 1.8)
+				Director.place_model(root, MD + "fence.glb", 2.2, Vector3(fp.x, ground(fp.x, fp.y) + 0.02, fp.y), yaw + rng.randf_range(-0.4, 0.4), Vector3(-PI * 0.5 + 0.06, 0, 0), panels.pick_random())
+				continue
+			var lean := rng.randf_range(-0.05, 0.05) + (rng.randf_range(-0.22, 0.22) if roll > 0.85 else 0.0)
+			var pv := Director.place_model(root, MD + "fence.glb", 2.2, Vector3(p.x, gy - 0.18, p.y), yaw + rng.randf_range(-0.04, 0.04), Vector3(lean, 0, rng.randf_range(-0.03, 0.03)), panels.pick_random())
+			Director.collider(root, Vector3(w, 2.2, 0.2), Transform3D(Basis(Vector3.UP, pv.rotation.y), Vector3(p.x, gy + 0.9, p.y)))
 
 # =================================================================== lávka, bunkr, sudy, cedule
 
