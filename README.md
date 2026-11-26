@@ -316,6 +316,9 @@ Mimo hon na alfu se bažinák objeví jen výjimečně (asi v 15 % výjezdů) ja
 rozestupu a volna od stromů/keřů; `mission_theme` dává cesty k modelům (těla, diktafon, bedna, vrak), takže každý archetyp má mise ve svém kabátě.
 Nová mise = skript dědící `missions/mission.gd` (place, start, tick, lines, targets, complete) a řádek v `MISSIONS`.
 
+**Testovací panel: F3** (myš se uvolní): přepnutí mise na stejné mapě, nová mapa, teleport k táboru, bunkru, vraku a ke všem cílům mise
+(s fajfkou u hotových), bažinák hned / teleport k němu, nesmrtelnost, zombie vyp/zap, zabít zombie, splnit úkol, vrtulník za 5 s, doplnit zdraví a náboje.
+
 Testy: `HLADINA_MISSION_TEST=1` misi sám odehraje (`HLADINA_HELI_T=4` zkrátí čekání na vrtulník, `HLADINA_TEST_DIE=1` test selhání).
 Náhledy bez hráče: `SWAMP_NOPLAYER=1 HLADINA_MISSION=cargo SWAMP_SHOTS="camp;act0;far0"`.
 V bažině je od začátku zapnutá bodycam (B), VHS kamera (V) a hledí helmy: déšť na něj postupně napadá

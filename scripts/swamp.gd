@@ -82,6 +82,8 @@ func _ready() -> void:
 	_load_settings()
 	var env_seed := OS.get_environment("SWAMP_SEED")
 	seed_used = int(env_seed) if env_seed != "" else int(Time.get_unix_time_from_system()) % 1000000
+	if Director.next_seed >= 0: seed_used = Director.next_seed      # testovací panel (F3): stejná mapa
+	Director.next_seed = -1
 	rng.seed = seed_used
 	noise.seed = seed_used
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
@@ -1681,6 +1683,11 @@ func _say(t: String) -> void:
 	_toast_t = 6.0
 
 func _input(event: InputEvent) -> void:
+	if missions and missions.debug_open:
+		if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode in [KEY_F3, KEY_ESCAPE]:
+			missions.toggle_debug()
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event is InputEventKey and event.pressed and not event.echo:
@@ -1692,6 +1699,8 @@ func _input(event: InputEvent) -> void:
 				if visor and visor.enabled: visor.wipe()
 			KEY_T:
 				if missions: missions.toggle_tracker()
+			KEY_F3:
+				if missions and not missions.preview: missions.toggle_debug()
 			KEY_G:
 				if missions: missions.drop()
 			KEY_1, KEY_2, KEY_3, KEY_4:
@@ -1861,9 +1870,9 @@ func _build_camp() -> void:
 	var uaz := Director.place_model(root, MD + "uaz_452.glb", 4.7, up + Vector3(0, -0.18, 0), yaw_g + PI * 0.5 + 0.2, Vector3(0.03, 0, -0.04))
 	Director.collider(root, Vector3(2.2, 2.3, 4.5), Transform3D(Basis(Vector3.UP, yaw_g + PI * 0.5 + 0.2), up + Vector3(0, 1.0, 0)))
 	# stan
-	var tp: Vector3 = at.call(spawn - g * 2.6 + side * 5.4)
-	Director.place_model(root, MD + "tent_military.glb", 6.2, tp + Vector3(0, -0.05, 0), yaw_g + PI * 0.5)
-	Director.collider(root, Vector3(5.4, 2.0, 5.0), Transform3D(Basis(Vector3.UP, yaw_g + PI * 0.5), tp + Vector3(0, 1.0, 0)))
+	var tp: Vector3 = at.call(spawn - g * 2.0 + side * 7.5)
+	Director.place_model(root, MD + "tent_military.glb", 11.0, tp + Vector3(0, -0.08, 0), yaw_g + PI * 0.5)
+	Director.collider(root, Vector3(6.2, 3.2, 5.8), Transform3D(Basis(Vector3.UP, yaw_g + PI * 0.5), tp + Vector3(0, 1.6, 0)))
 	# bedna s vysílačkou a lucernou
 	var cp: Vector3 = at.call(spawn + side * 2.3 - g * 1.2)
 	var crate := Director.box(root, Vector3(0.75, 0.5, 0.5), cp + Vector3(0, 0.22, 0), Color(0.16, 0.2, 0.12))

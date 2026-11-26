@@ -22,6 +22,10 @@ const MISSIONS := {
 	"alpha": "res://scripts/missions/m_alpha.gd",
 }
 const HELI_WAIT := 45.0
+const MISSION_NAMES := {"crew": "Najdi předchozí četu", "clear": "Vyčisti oblast", "cargo": "Vyzvedni náklad", "probes": "Měřicí sondy", "alpha": "Hon na alfu"}
+# testovací panel (F3): přežijí znovunačtení scény
+static var next_mission := ""
+static var next_seed := -1
 const BOARD_R := 7.0
 
 var main: Node3D
@@ -81,6 +85,8 @@ func setup(m: Node3D) -> void:
 	waves = m.waves
 	waves.director = self
 	var forced := OS.get_environment("HLADINA_MISSION")
+	if next_mission != "": forced = next_mission
+	next_mission = ""
 	var pool: Array = m.mission_pool() if m.has_method("mission_pool") else MISSIONS.keys()
 	mission_id = forced if MISSIONS.has(forced) else pool[m.rng.randi() % pool.size()]
 	mission = load(MISSIONS[mission_id]).new()
@@ -252,6 +258,7 @@ func dropped_light(pos: Vector3, yaw: float) -> SpotLight3D:
 # ------------------------------------------------------------------ průběh
 
 func _process(dt: float) -> void:
+	if not is_inside_tree() or _leaving: return
 	if preview:
 		_update_flicker(dt)
 		return
@@ -272,6 +279,9 @@ func _process(dt: float) -> void:
 		_update_ui()
 		return
 	t += dt
+	if god:
+		waves.health = 100.0
+	if _dbg_test and t > 1.0: _run_debug_test()
 	if _autotest: _run_autotest(dt)
 	if _snaps.size() > 0 and t >= float(_snaps[0]):
 		get_viewport().get_texture().get_image().save_png(OS.get_environment("SWAMP_OUT") + "/hud_%s.png" % _snaps[0])
@@ -361,6 +371,7 @@ func _update_tracker(dt: float) -> void:
 
 func _call_heli() -> void:
 	state = "wait_heli"
+	_radio_act.on = false
 	_heli_t = float(OS.get_environment("HLADINA_HELI_T")) if OS.get_environment("HLADINA_HELI_T") != "" else HELI_WAIT
 	snd("res://audio/radio/radio_click.wav", -2.0)
 	radio("Centrála: Rozumím, vrtulník je na cestě, odhad %d sekund. Držte se u výsadku." % int(_heli_t), 7.0)
@@ -621,11 +632,15 @@ var _test_e := false
 var _at_t := 0.0
 var _at_last := ""
 
-func _goto(p: Vector3) -> void:
-	var from := p + Vector3(1.1, 0, 0.3)
+## Teleport z testovacího panelu: kousek od cíle, pohled na něj.
+func _tp(p: Vector3) -> void:
+	_goto(p, 3.2, -0.3)
+
+func _goto(p: Vector3, dist := 1.15, pitch := -0.75) -> void:
+	var from := p + Vector3(1.1, 0, 0.3).normalized() * dist
 	from.y = main.ground(from.x, from.z)
 	var yaw := atan2(-(p.x - from.x), -(p.z - from.z))
-	player.teleport(Vector3(from.x, maxf(from.y, main.WATER_Y - 0.6) + 0.05, from.z), yaw, -0.75)
+	player.teleport(Vector3(from.x, maxf(from.y, main.WATER_Y - 0.6) + 0.05, from.z), yaw, pitch)
 	player.velocity = Vector3.ZERO
 
 func _run_autotest(dt: float) -> void:
@@ -676,3 +691,158 @@ func _run_autotest(dt: float) -> void:
 			_at_t = 3.0
 		"board":
 			_goto(main.extraction_point() + Vector3(2, 0, 0))
+
+# ------------------------------------------------------------------ testovací panel (F3)
+# Přepnutí mise (stejná / nová mapa), teleport ke všem cílům a cheaty na kontrolu.
+
+var debug_open := false
+var god := false
+var _dbg: CanvasLayer
+
+func toggle_debug() -> void:
+	debug_open = not debug_open
+	if debug_open:
+		_build_debug()
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		player.control_enabled = false
+	else:
+		if _dbg: _dbg.queue_free()
+		_dbg = null
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		if state != "done" and state != "failed" and not waves._dead: player.control_enabled = true
+
+func _btn(box: Container, text: String, cb: Callable, col := Color(0.92, 0.9, 0.85)) -> void:
+	var b := Button.new()
+	b.text = text
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_font_size_override("font_size", 17)
+	b.add_theme_color_override("font_color", col)
+	b.focus_mode = Control.FOCUS_NONE
+	b.pressed.connect(func():
+		cb.call()
+		if debug_open: _build_debug())      # obnovit (stav, nové cíle)
+	box.add_child(b)
+
+func _head(box: Container, text: String) -> void:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", 15)
+	l.add_theme_color_override("font_color", Color(0.65, 0.8, 0.6))
+	box.add_child(l)
+
+func _build_debug() -> void:
+	if _dbg: _dbg.queue_free()
+	_dbg = CanvasLayer.new()
+	_dbg.layer = 40
+	add_child(_dbg)
+	var panel := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.04, 0.05, 0.04, 0.9)
+	sb.border_color = Color(0.4, 0.55, 0.35, 0.8)
+	sb.set_border_width_all(1)
+	sb.set_content_margin_all(12)
+	panel.add_theme_stylebox_override("panel", sb)
+	panel.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	panel.offset_left = -430
+	panel.offset_right = -20
+	panel.offset_top = 20
+	panel.offset_bottom = -20
+	_dbg.add_child(panel)
+	var sc := ScrollContainer.new()
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(sc)
+	var box := VBoxContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 3)
+	sc.add_child(box)
+	_head(box, "TEST  (F3 / Esc zavřít)   mapa %d, mise %s, stav %s" % [main.seed_used if main.get("seed_used") != null else 0, mission_id, state])
+	# mise
+	_head(box, "Přepnout misi – stejná mapa")
+	for id in MISSIONS:
+		_btn(box, ("▶ " if id == mission_id else "   ") + MISSION_NAMES.get(id, id), _restart_with.bind(id, true))
+	_btn(box, "   Nová mapa (stejná mise)", _restart_with.bind(mission_id, false))
+	_btn(box, "   Nová mapa, náhodná mise", _restart_with.bind("", false))
+	# teleporty
+	_head(box, "Teleport")
+	_btn(box, "Tábor (výsadek, vysílačka)", func(): _tp(main.radio_pos))
+	if main.get("goal") != null: _btn(box, "Bunkr", func(): _tp(main.goal))
+	if mission.get("wreck_pos") != null: _btn(box, "Vrak vrtulníku", func(): _tp(mission.wreck_pos))
+	var i := 0
+	for a in _acts:
+		if a == _radio_act: continue
+		i += 1
+		var p: Vector3 = a.pos
+		var d := int(Vector2(p.x - player.global_position.x, p.z - player.global_position.z).length())
+		_btn(box, "%d) %s%s  (%d m)" % [i, a.text, "" if a.on else "  ✓", d], func(): _tp(p), Color(0.92, 0.9, 0.85) if a.on else Color(0.55, 0.55, 0.5))
+	if mission_id == "alpha" or waves.alpha.enabled:
+		_btn(box, "Bažinák: vynořit hned", func():
+			waves.alpha.enabled = true
+			if waves.alpha.state == "hidden": waves.alpha._t = 0.0)
+		if waves.alpha.state == "stalk": _btn(box, "Bažinák: teleport k němu", func(): _tp(waves.alpha.global_position))
+	# cheaty
+	_head(box, "Cheaty")
+	_btn(box, "Nesmrtelnost: " + ("ZAP" if god else "vyp"), func(): god = not god)
+	_btn(box, "Zaměřovač: " + ("zap" if tracker else "vyp"), func(): tracker = not tracker)
+	_btn(box, "Zombie: " + ("vypnuté" if waves.mode == "off" else "zapnuté"), func():
+		waves.mode = mission.waves_mode if waves.mode == "off" else "off"
+		_kill_zombies())
+	_btn(box, "Zabít všechny zombie", _kill_zombies)
+	if state == "active": _btn(box, "Splnit úkol mise", func(): mission.complete())
+	if state in ["active", "extract"]: _btn(box, "Přivolat vrtulník hned (5 s)", func():
+		if state == "active": mission.finished = true
+		_call_heli()
+		_heli_t = 5.0)
+	_btn(box, "Doplnit zdraví a náboje", func():
+		waves.health = 100.0
+		player.weapon.refill())
+	_btn(box, "Zpět do menu", func(): get_tree().change_scene_to_file("res://main.tscn"))
+
+var _leaving := false
+
+func _restart_with(id: String, same_map: bool) -> void:
+	_leaving = true
+	set_process(false)
+	next_mission = id
+	next_seed = main.seed_used if same_map else -1
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	get_tree().reload_current_scene()
+
+func _kill_zombies() -> void:
+	for z in waves.ZombieScript.crowd:
+		if is_instance_valid(z) and not z.dead: z.queue_free()
+	waves.ZombieScript.crowd.clear()
+	waves._to_spawn = 0
+
+# test panelu (HLADINA_DEBUG_TEST=1): zmáčkne všechna tlačítka kromě restartů a menu, pak přepne misi na stejné mapě
+var _dbg_test := OS.get_environment("HLADINA_DEBUG_TEST") == "1"
+static var _dbg_test_round := 0
+
+func _run_debug_test() -> void:
+	_dbg_test = false
+	print("PANEL: mise ", mission_id, " mapa ", main.seed_used, " (kolo testu ", _dbg_test_round, ")")
+	if _dbg_test_round == 1:
+		get_tree().quit()
+		return
+	toggle_debug()
+	var idx := 0
+	while idx < 60:
+		var el := []
+		for b in _dbg.find_children("*", "Button", true, false):
+			var tx: String = (b as Button).text
+			if "mapa" in tx.to_lower() or "menu" in tx.to_lower() or tx.begins_with("   ") or tx.begins_with("▶"): continue
+			el.append(b)
+		if idx >= el.size(): break
+		var bt: Button = el[idx]
+		var txt := bt.text.strip_edges()
+		bt.pressed.emit()
+		await get_tree().process_frame
+		print("PANEL: ", txt, " -> stav ", state, " hráč ", player.global_position.snapped(Vector3.ONE * 0.1), " zombie ", waves._alive())
+		idx += 1
+	var tps := 0
+	for b in _dbg.find_children("*", "Button", true, false):
+		var tx3: String = (b as Button).text
+		if tx3.contains(" m)") or tx3 in ["Tábor (výsadek, vysílačka)", "Bunkr", "Vrak vrtulníku"]:
+			tps += 1
+	print("PANEL: tlačítek teleportu ", tps)
+	_dbg_test_round = 1
+	_restart_with("cargo", true)
